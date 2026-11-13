@@ -1,0 +1,83 @@
+# Dependencies
+node_modules/
+
+# Build output and packaged applications
+dist/
+dist-electron/
+release/
+out/
+*.AppImage
+*.deb
+*.snap
+*.asar
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+*.key
+*.pem
+*.crt
+
+# Logs and runtime data
+logs/
+*.log
+*.pid
+*.pid.lock
+*.seed
+
+# Caches and temporary files
+.cache/
+.temp/
+tmp/
+temp/
+*.tmp
+*.temp
+.eslintcache
+.vite/
+*.tsbuildinfo
+
+# LaTeX generated artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.run.xml
+*.synctex
+*.synctex.gz
+*.toc
+*.xdv
+
+# Operating system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# Local test and coverage output
+coverage/
+.nyc_output/
+test-results/
+
+# Electron and bundler metadata
+electron-builder.yml.bak
+builder-debug.yml
+*.blockmap

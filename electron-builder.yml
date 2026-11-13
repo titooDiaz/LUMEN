@@ -1,0 +1,15 @@
+appId: com.lumen.latex
+productName: LUMEN
+directories:
+  output: release
+files:
+  - dist
+  - dist-electron
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Office;Development;Education;
+  maintainer: LUMEN LaTeX Team <lumen@example.com>
+  synopsis: Modern LaTeX Desktop Editor
+  description: A professional, minimal, and real-time collaborative desktop LaTeX editor for Linux.

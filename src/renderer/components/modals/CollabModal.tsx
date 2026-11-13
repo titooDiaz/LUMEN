@@ -1,0 +1,314 @@
+import React, { useState } from 'react';
+import {
+  X,
+  Share2,
+  Server,
+  Users,
+  Copy,
+  Check,
+  Power,
+  Shield,
+  Wifi,
+  Radio,
+  UserCheck,
+} from 'lucide-react';
+import { CollabStatus } from '../../../shared/types';
+
+interface CollabModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  status: CollabStatus;
+  onStartServer: (port?: number, token?: string) => Promise<void>;
+  onStopServer: () => Promise<void>;
+  onConnectRemote: (host: string, port: number, token: string, name: string) => void;
+  currentUserName: string;
+  onChangeUserName: (name: string) => void;
+  isConnectedToRemote: boolean;
+}
+
+export const CollabModal: React.FC<CollabModalProps> = ({
+  isOpen,
+  onClose,
+  status,
+  onStartServer,
+  onStopServer,
+  onConnectRemote,
+  currentUserName,
+  onChangeUserName,
+  isConnectedToRemote,
+}) => {
+  const [activeTab, setActiveTab] = useState<'host' | 'join'>('host');
+  const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
+
+  // Host configuration
+  const [hostPort, setHostPort] = useState(8765);
+  const [customToken, setCustomToken] = useState('');
+
+  // Join configuration
+  const [joinHost, setJoinHost] = useState('127.0.0.1');
+  const [joinPort, setJoinPort] = useState(8765);
+  const [joinToken, setJoinToken] = useState('');
+  const [joinNick, setJoinNick] = useState(currentUserName || 'Investigador');
+
+  if (!isOpen) return null;
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(id);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
+  const handleStartHosting = async () => {
+    await onStartServer(hostPort, customToken || undefined);
+  };
+
+  const handleJoin = () => {
+    onChangeUserName(joinNick);
+    onConnectRemote(joinHost, joinPort, joinToken, joinNick);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-card border border-border shadow-2xl rounded-xl w-full max-w-xl overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-card/60">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20">
+              <Share2 className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm text-foreground">Colaboración Descentralizada</h3>
+              <p className="text-xs text-muted-foreground">Edición en tiempo real alojada directamente en tu equipo (P2P Host)</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-border bg-secondary/30 px-5 pt-2 space-x-4 text-xs font-medium">
+          <button
+            onClick={() => setActiveTab('host')}
+            className={`pb-2 border-b-2 flex items-center space-x-1.5 transition ${
+              activeTab === 'host'
+                ? 'border-primary text-primary font-semibold'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Server className="w-3.5 h-3.5" />
+            <span>Hospedar Sesión (Servidor Anfitrión)</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('join')}
+            className={`pb-2 border-b-2 flex items-center space-x-1.5 transition ${
+              activeTab === 'join'
+                ? 'border-primary text-primary font-semibold'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Wifi className="w-3.5 h-3.5" />
+            <span>Unirse a Sesión de un Colega</span>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-4 text-xs">
+          {activeTab === 'host' ? (
+            <div className="space-y-4">
+              {/* Server Status Banner */}
+              <div
+                className={`p-3.5 rounded-lg border flex items-center justify-between transition ${
+                  status.isHosting
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-secondary/40 border-border text-muted-foreground'
+                }`}
+              >
+                <div className="flex items-center space-x-2.5">
+                  <div className={`w-2.5 h-2.5 rounded-full ${status.isHosting ? 'bg-emerald-400 animate-pulse' : 'bg-muted-foreground'}`} />
+                  <div>
+                    <span className="font-semibold text-foreground">
+                      {status.isHosting ? 'Servidor Anfitrión Activo' : 'Servidor Inactivo'}
+                    </span>
+                    <p className="text-[11px] text-muted-foreground">
+                      {status.isHosting
+                        ? `Alojando en puerto ${status.port} • ${status.clients.length} participante(s)`
+                        : 'Inicia el servidor para compartir este proyecto desde tu máquina'}
+                    </p>
+                  </div>
+                </div>
+
+                {status.isHosting ? (
+                  <button
+                    onClick={onStopServer}
+                    className="px-3 py-1.5 bg-destructive/20 hover:bg-destructive/30 text-red-400 border border-destructive/30 rounded-md font-medium transition flex items-center space-x-1"
+                  >
+                    <Power className="w-3.5 h-3.5" />
+                    <span>Detener</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStartHosting}
+                    className="px-3 py-1.5 bg-primary text-primary-foreground hover:bg-primary-hover rounded-md font-medium transition flex items-center space-x-1 shadow-sm"
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>Iniciar Servidor</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Host Details when Running */}
+              {status.isHosting && (
+                <div className="space-y-3 bg-secondary/30 p-3.5 rounded-lg border border-border">
+                  <div className="flex items-center justify-between text-muted-foreground font-semibold">
+                    <span>Direcciones de Conexión en Red (LAN / Wi-Fi):</span>
+                    <Shield className="w-3.5 h-3.5 text-primary" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {status.hostIPs?.map((ip, i) => {
+                      const connStr = `${ip}:${status.port}`;
+                      return (
+                        <div key={i} className="flex items-center justify-between bg-card p-2 rounded border border-border text-foreground font-mono">
+                          <span>{connStr}</span>
+                          <button
+                            onClick={() => copyToClipboard(connStr, `ip-${i}`)}
+                            className="p-1 text-muted-foreground hover:text-foreground rounded transition"
+                            title="Copiar dirección"
+                          >
+                            {copiedIndex === `ip-${i}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between bg-card p-2 rounded border border-border text-foreground">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-muted-foreground">Token de Seguridad:</span>
+                      <span className="font-mono font-bold text-primary">{status.token}</span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(status.token || '', 'token')}
+                      className="p-1 text-muted-foreground hover:text-foreground rounded transition"
+                      title="Copiar token"
+                    >
+                      {copiedIndex === 'token' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Connected Peers list */}
+              {status.isHosting && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-muted-foreground font-semibold">
+                    <span className="flex items-center space-x-1.5">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Participantes Conectados ({status.clients.length})</span>
+                    </span>
+                  </div>
+
+                  {status.clients.length === 0 ? (
+                    <p className="text-center py-4 text-muted-foreground bg-secondary/20 rounded border border-dashed border-border">
+                      Esperando a que otros usuarios se conecten con tu IP y Token...
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                      {status.clients.map((client) => (
+                        <div key={client.id} className="flex items-center justify-between p-2 rounded bg-secondary/40 border border-border">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: client.color }} />
+                            <span className="font-medium text-foreground">{client.name}</span>
+                            {client.isHost && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/20 text-primary font-semibold">
+                                Anfitrión
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-medium">Lectura / Escritura</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Join Tab */
+            <div className="space-y-3">
+              <div>
+                <label className="text-muted-foreground block mb-1">Tu Nombre de Usuario / Autor:</label>
+                <input
+                  type="text"
+                  value={joinNick}
+                  onChange={(e) => setJoinNick(e.target.value)}
+                  className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Ej. Dr. Martínez"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="text-muted-foreground block mb-1">Dirección IP del Anfitrión:</label>
+                  <input
+                    type="text"
+                    value={joinHost}
+                    onChange={(e) => setJoinHost(e.target.value)}
+                    className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                    placeholder="192.168.1.50"
+                  />
+                </div>
+                <div>
+                  <label className="text-muted-foreground block mb-1">Puerto:</label>
+                  <input
+                    type="number"
+                    value={joinPort}
+                    onChange={(e) => setJoinPort(parseInt(e.target.value, 10))}
+                    className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-muted-foreground block mb-1">Token de Seguridad de la Sesión:</label>
+                <input
+                  type="text"
+                  value={joinToken}
+                  onChange={(e) => setJoinToken(e.target.value)}
+                  className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Introduce el token proporcionado por el creador"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleJoin}
+                  className="w-full py-2 bg-primary text-primary-foreground hover:bg-primary-hover rounded-md font-medium transition flex items-center justify-center space-x-2 shadow-sm"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Conectar y Sincronizar en Tiempo Real</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-border flex items-center justify-end space-x-2 bg-card/60">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
