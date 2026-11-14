@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   selectDirectoryDialog,
   selectImageDialog,
@@ -20,6 +21,7 @@ import { collabServerInstance } from './ipc/collabServer';
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -28,7 +30,7 @@ function createWindow() {
     title: 'LUMEN — Modern LaTeX Desktop Editor',
     backgroundColor: '#09090b',
     webPreferences: {
-      preload: path.join(path.dirname(new URL(import.meta.url).pathname), 'preload.mjs'),
+      preload: path.join(currentDir, 'preload.mjs'),
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true,
@@ -42,12 +44,13 @@ function createWindow() {
     },
   });
 
-  const __dirname_es = path.dirname(new URL(import.meta.url).pathname);
   // Load URL or build
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname_es, '../renderer/index.html'));
+    // Vite emits the renderer entry point at dist/index.html. The Electron
+    // main bundle is emitted beside it in dist-electron/.
+    mainWindow.loadFile(path.join(currentDir, '../dist/index.html'));
   }
 
   // Hide default menu for ultra clean minimalist UI

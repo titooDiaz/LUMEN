@@ -100,6 +100,9 @@ export function copyFileToProject(sourcePath: string, targetFolderPath: string):
   const fileName = path.basename(sourcePath);
   const destination = path.join(targetFolderPath, fileName);
 
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`El archivo de imagen no existe: ${sourcePath}`);
+  }
   fs.copyFileSync(sourcePath, destination);
   return destination;
 }

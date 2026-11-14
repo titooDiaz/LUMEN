@@ -82,6 +82,7 @@ export interface CollabStatus {
 }
 
 export interface LumenAPI {
+  isNative: boolean;
   // Filesystem
   selectDirectory: () => Promise<string | null>;
   selectImage: () => Promise<{ path: string; name: string } | null>;

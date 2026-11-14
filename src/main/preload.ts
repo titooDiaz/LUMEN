@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { CompilerType, LumenAPI, ProjectMetadata, TemplateId } from '../shared/types';
 
 const api: LumenAPI = {
+  isNative: true,
   // Filesystem
   selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
   selectImage: () => ipcRenderer.invoke('dialog:select-image'),

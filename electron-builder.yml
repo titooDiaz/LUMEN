@@ -2,6 +2,10 @@ appId: com.lumen.latex
 productName: LUMEN
 directories:
   output: release
+# The renderer uses PDF.js' browser build and the collaboration transport is
+# pure WebSocket. Neither path loads native Node addons at runtime, so avoid
+# rebuilding optional transitive addons (canvas/leveldown) for Electron.
+npmRebuild: false
 files:
   - dist
   - dist-electron

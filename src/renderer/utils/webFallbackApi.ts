@@ -40,6 +40,7 @@ export function initLumenAPI(): void {
     let collabPort = 8765;
 
     window.lumenAPI = {
+      isNative: false,
       selectDirectory: async () => '/home/miguel/Documents/Proyecto-Demo',
       selectImage: async () => ({
         path: '/home/miguel/Pictures/figure1.png',
@@ -103,8 +104,10 @@ export function initLumenAPI(): void {
         return true;
       },
       copyFileToProject: async (sourcePath: string, targetFolderPath: string) => {
-        const fileName = sourcePath.split('/').pop() || 'image.png';
-        return `${targetFolderPath}/${fileName}`;
+        const fileName = sourcePath.split(/[\\/]/).pop() || 'image.png';
+        const destination = `${targetFolderPath}/${fileName}`;
+        vfs[destination] = '';
+        return destination;
       },
       getCompilers: async () => mockCompilers,
       compile: async (params): Promise<CompilationResult> => {
@@ -207,7 +210,16 @@ export function initLumenAPI(): void {
           : [],
       }),
       getLocalIPs: async () => ['192.168.1.105', '127.0.0.1'],
-      exportPdf: async () => true,
+      exportPdf: async (pdfPath: string) => {
+        if (!pdfPath) return false;
+        const link = document.createElement('a');
+        link.href = `data:application/pdf;base64,${'JVBERi0xLjUK'}`;
+        link.download = pdfPath.split('/').pop() || 'main.pdf';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return true;
+      },
       showInFileManager: async () => {},
     };
   }

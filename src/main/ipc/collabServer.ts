@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import * as os from 'node:os';
+import * as Y from 'yjs';
 import { CollabStatus } from '../../shared/types';
 
 interface ConnectedPeer {
@@ -18,6 +19,7 @@ class CollabHostServer {
   private token: string = '';
   private roomId: string = 'lumen-doc';
   private peers: Map<string, ConnectedPeer> = new Map();
+  private documents: Map<string, Y.Doc> = new Map();
 
   public getLocalIPAddresses(): string[] {
     const interfaces = os.networkInterfaces();
@@ -73,13 +75,41 @@ class CollabHostServer {
 
       // Handle raw messages (Yjs sync, awareness, cursor, chat)
       ws.on('message', (data: Buffer | string) => {
-        // Broadcast to all other peers
-        for (const [otherId, otherPeer] of this.peers.entries()) {
-          if (otherId !== peerId && otherPeer.socket.readyState === WebSocket.OPEN) {
-            otherPeer.socket.send(data);
+        const raw = Buffer.isBuffer(data) ? data.toString('utf8') : data;
+        try {
+          const message = JSON.parse(raw);
+          if (message.type === 'lumen:y-sync-request') {
+            for (const [filePath, doc] of this.documents) {
+              this.send(ws, {
+                type: 'lumen:y-update',
+                filePath,
+                update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
+              });
+            }
+          } else if (
+            (message.type === 'lumen:y-update' || message.type === 'lumen:y-sync-init') &&
+            typeof message.filePath === 'string' &&
+            typeof message.update === 'string'
+          ) {
+            const doc = this.documents.get(message.filePath) || new Y.Doc();
+            Y.applyUpdate(doc, Buffer.from(message.update, 'base64'));
+            this.documents.set(message.filePath, doc);
+            this.broadcast(raw, peerId);
+          } else {
+            this.broadcast(raw, peerId);
           }
+        } catch {
+          // Non-JSON payloads are forwarded for future binary protocol messages.
+          this.broadcast(data, peerId);
         }
       });
+
+      /*
+       * The host renderer also connects as a peer. This keeps the server
+       * transport stateless from the UI's perspective while the server owns
+       * the canonical Y.Doc for every file.
+       */
+      ws.send(JSON.stringify({ type: 'lumen:ready', peerId }));
 
       ws.on('close', () => {
         this.peers.delete(peerId);
@@ -111,6 +141,7 @@ class CollabHostServer {
         }
       }
       this.peers.clear();
+      this.documents.clear();
       this.wss.close();
       this.wss = null;
       return true;
@@ -150,6 +181,20 @@ class CollabHostServer {
     for (const peer of this.peers.values()) {
       if (peer.socket.readyState === WebSocket.OPEN) {
         peer.socket.send(payload);
+      }
+    }
+  }
+
+  private send(socket: WebSocket, payload: unknown): void {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload));
+    }
+  }
+
+  private broadcast(data: Buffer | string, exceptPeerId: string): void {
+    for (const [otherId, otherPeer] of this.peers.entries()) {
+      if (otherId !== exceptPeerId && otherPeer.socket.readyState === WebSocket.OPEN) {
+        otherPeer.socket.send(data);
       }
     }
   }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Image as ImageIcon, Check, FolderOpen } from 'lucide-react';
 
 interface ImageInsertModalProps {
@@ -21,16 +21,35 @@ export const ImageInsertModal: React.FC<ImageInsertModalProps> = ({
   const [width, setWidth] = useState('0.8\\textwidth');
   const [placement, setPlacement] = useState('htbp');
   const [isCentered, setIsCentered] = useState(true);
+  const [isCopying, setIsCopying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setError(null);
+      setIsCopying(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleSelectFile = async () => {
+    if (!window.lumenAPI.isNative) {
+      fileInputRef.current?.click();
+      return;
+    }
+    setError(null);
     try {
       const selected = await window.lumenAPI.selectImage();
       if (selected) {
+        setIsCopying(true);
         // Copy image into project's images/ subfolder
         const targetDir = `${projectPath}/images`;
         const copiedDestination = await window.lumenAPI.copyFileToProject(selected.path, targetDir);
+        if (!copiedDestination) {
+          throw new Error('No se pudo copiar la imagen al proyecto.');
+        }
         setImagePath(copiedDestination);
         const fileName = selected.name;
         setImageRelPath(`images/${fileName}`);
@@ -39,9 +58,34 @@ export const ImageInsertModal: React.FC<ImageInsertModalProps> = ({
         const baseName = fileName.replace(/\.[^/.]+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '-');
         setLabel(`fig:${baseName}`);
         setCaption(`Ilustración representativa de ${baseName.replace(/-/g, ' ')}`);
+        setIsCopying(false);
       }
     } catch (err) {
       console.error('Error selecting image:', err);
+      setError(err instanceof Error ? err.message : 'No se pudo seleccionar la imagen.');
+      setIsCopying(false);
+    }
+  };
+
+  const handleBrowserFile = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    setIsCopying(true);
+    try {
+      const copiedDestination = await window.lumenAPI.copyFileToProject(
+        file.name,
+        `${projectPath}/images`
+      );
+      setImagePath(copiedDestination);
+      setImageRelPath(`images/${file.name}`);
+      const baseName = file.name.replace(/\.[^/.]+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '-');
+      setLabel(`fig:${baseName}`);
+      setCaption(`Ilustración representativa de ${baseName.replace(/-/g, ' ')}`);
+    } catch (err) {
+      console.error('Error importing browser image:', err);
+      setError(err instanceof Error ? err.message : 'No se pudo importar la imagen.');
+    } finally {
+      setIsCopying(false);
     }
   };
 
@@ -105,9 +149,25 @@ export const ImageInsertModal: React.FC<ImageInsertModalProps> = ({
                 className="px-3 py-1.5 bg-secondary hover:bg-accent border border-border rounded-md font-medium text-foreground flex items-center space-x-1.5 transition"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                <span>Explorar...</span>
+                <span>{isCopying ? 'Copiando...' : 'Explorar...'}</span>
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.pdf,.eps,.svg"
+                className="hidden"
+                onChange={(event) => {
+                  void handleBrowserFile(event.target.files?.[0]);
+                  event.currentTarget.value = '';
+                }}
+              />
             </div>
+            {imagePath && !error && (
+              <p className="mt-1 text-[10px] text-emerald-400">
+                Imagen copiada en el proyecto: {imagePath}
+              </p>
+            )}
+            {error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
           </div>
 
           {/* Caption & Label */}
@@ -190,7 +250,7 @@ export const ImageInsertModal: React.FC<ImageInsertModalProps> = ({
           </button>
           <button
             onClick={handleConfirm}
-            disabled={!imageRelPath}
+            disabled={!imageRelPath || isCopying}
             className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary-hover rounded-md transition flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
           >
             <Check className="w-3.5 h-3.5" />

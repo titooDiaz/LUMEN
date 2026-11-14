@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type * as monacoType from 'monaco-editor';
+import * as Y from 'yjs';
 import {
   CompilerInfo,
   CompilerType,
@@ -25,6 +26,19 @@ import { NewProjectModal } from './components/modals/NewProjectModal';
 import { X, FileCode } from 'lucide-react';
 
 export const App: React.FC = () => {
+  const encodeUpdate = (update: Uint8Array): string => {
+    let binary = '';
+    update.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    return btoa(binary);
+  };
+
+  const decodeUpdate = (encoded: string): Uint8Array => {
+    const binary = atob(encoded);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  };
+
   // Theme state
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('lumen_theme') as 'dark' | 'light') || 'dark';
@@ -71,6 +85,8 @@ export const App: React.FC = () => {
   const [userName, setUserName] = useState<string>('Autor Local');
   const [isConnectedRemote, setIsConnectedRemote] = useState<boolean>(false);
   const collabWsRef = useRef<WebSocket | null>(null);
+  const yDocsRef = useRef<Map<string, Y.Doc>>(new Map());
+  const applyingRemoteUpdateRef = useRef(false);
 
   // Monaco editor reference
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
@@ -144,6 +160,7 @@ export const App: React.FC = () => {
       setOpenTabs([mainFilePath]);
       setActiveFilePath(mainFilePath);
       setFileContents({ [mainFilePath]: content });
+      ensureCollabDocument(mainFilePath, content);
 
       // Trigger initial compilation
       triggerCompile(metadata, mainFile, content, selectedCompiler);
@@ -191,9 +208,28 @@ export const App: React.FC = () => {
   };
 
   const handleManualCompile = () => {
-    if (!currentProject || !activeFilePath) return;
-    const currentCode = fileContents[activeFilePath] || '';
-    triggerCompile(currentProject, currentProject.mainFile, currentCode, selectedCompiler);
+    if (!currentProject) return;
+    void compileCurrentProject(currentProject);
+  };
+
+  const compileCurrentProject = async (project: ProjectMetadata) => {
+    const mainFilePath = `${project.path}/${project.mainFile}`;
+    const activeContent = activeFilePath ? fileContents[activeFilePath] : undefined;
+
+    // Persist the file currently being edited before compiling. The compiler
+    // must always receive main.tex, even when a section or bibliography tab
+    // is active.
+    if (activeFilePath && activeContent !== undefined && isDirty[activeFilePath]) {
+      await window.lumenAPI.writeFile(activeFilePath, activeContent);
+      setIsDirty((prev) => ({ ...prev, [activeFilePath]: false }));
+    }
+
+    const mainContent =
+      activeFilePath === mainFilePath && activeContent !== undefined
+        ? activeContent
+        : await window.lumenAPI.readFile(mainFilePath);
+
+    await triggerCompile(project, project.mainFile, mainContent, selectedCompiler);
   };
 
   // Handle editor code change with auto-compile debounce
@@ -203,16 +239,15 @@ export const App: React.FC = () => {
     setFileContents((prev) => ({ ...prev, [activeFilePath]: newCode }));
     setIsDirty((prev) => ({ ...prev, [activeFilePath]: true }));
 
-    // Send collab update if connected
-    if (collabWsRef.current && collabWsRef.current.readyState === WebSocket.OPEN) {
-      collabWsRef.current.send(
-        JSON.stringify({
-          type: 'lumen:code-change',
-          filePath: activeFilePath,
-          content: newCode,
-          sender: userName,
-        })
-      );
+    const doc = yDocsRef.current.get(activeFilePath);
+    if (doc && !applyingRemoteUpdateRef.current) {
+      const text = doc.getText('content');
+      doc.transact(() => {
+        if (text.toString() !== newCode) {
+          text.delete(0, text.length);
+          text.insert(0, newCode);
+        }
+      }, 'local');
     }
 
     // Auto-save & auto-compile
@@ -224,8 +259,8 @@ export const App: React.FC = () => {
         // Save file to disk
         await window.lumenAPI.writeFile(activeFilePath, newCode);
         setIsDirty((prev) => ({ ...prev, [activeFilePath]: false }));
-        // Compile
-        triggerCompile(currentProject, currentProject.mainFile, newCode, selectedCompiler);
+        // Compile the actual project entry point, not whichever tab is active.
+        await compileCurrentProject(currentProject);
       }, 900);
     }
   };
@@ -239,15 +274,32 @@ export const App: React.FC = () => {
 
   // Insert snippet into Monaco Editor at cursor position
   const handleInsertCode = (snippet: string) => {
-    if (!editorRef.current) return;
-    const editor = editorRef.current;
-    const contribution = editor.getContribution('snippetController2') as any;
-    if (contribution) {
-      contribution.insert(snippet);
-    } else {
-      editor.trigger('keyboard', 'type', { text: snippet });
+    if (!editorRef.current || !activeFilePath) {
+      alert('Selecciona primero un archivo LaTeX para insertar el contenido.');
+      return;
     }
+    const editor = editorRef.current;
+    const selection = editor.getSelection();
+    if (!selection) return;
+    editor.executeEdits('lumen-visual-insert', [
+      {
+        range: selection,
+        text: snippet,
+        forceMoveMarkers: true,
+      },
+    ]);
+    // Monaco's controlled value can be updated asynchronously. Persist the
+    // resulting model immediately so visual insertions cannot be overwritten
+    // by the previous React value.
+    handleCodeChange(editor.getValue());
     editor.focus();
+  };
+
+  const handleInsertImage = (snippet: string) => {
+    handleInsertCode(snippet);
+    if (currentProject) {
+      void refreshProjectTree(currentProject.path);
+    }
   };
 
   // Jump to line in editor
@@ -269,11 +321,28 @@ export const App: React.FC = () => {
       try {
         const content = await window.lumenAPI.readFile(filePath);
         setFileContents((prev) => ({ ...prev, [filePath]: content }));
+        ensureCollabDocument(filePath, content);
       } catch (err) {
         console.error('Error reading file:', err);
       }
     }
   };
+
+  const ensureCollabDocument = useCallback((filePath: string, content: string) => {
+    if (yDocsRef.current.has(filePath)) return;
+    const doc = new Y.Doc();
+    const text = doc.getText('content');
+    if (content) text.insert(0, content);
+    doc.on('update', (update: Uint8Array, origin: unknown) => {
+      if (origin === 'remote' || !collabWsRef.current || collabWsRef.current.readyState !== WebSocket.OPEN) return;
+      collabWsRef.current.send(JSON.stringify({
+        type: 'lumen:y-update',
+        filePath,
+        update: encodeUpdate(update),
+      }));
+    });
+    yDocsRef.current.set(filePath, doc);
+  }, []);
 
   // Close tab
   const handleCloseTab = (tabPath: string, e: React.MouseEvent) => {
@@ -359,7 +428,15 @@ export const App: React.FC = () => {
       alert('Primero debes compilar el documento para generar el archivo PDF.');
       return;
     }
-    await window.lumenAPI.exportPdf(compileResult.pdfPath);
+    try {
+      const exported = await window.lumenAPI.exportPdf(compileResult.pdfPath);
+      if (!exported) {
+        alert('No se pudo exportar el PDF. Verifica que el archivo compilado exista.');
+      }
+    } catch (err) {
+      console.error('PDF export failed:', err);
+      alert('No se pudo exportar el PDF.');
+    }
   };
 
   // Collaboration Host Server Actions
@@ -368,6 +445,7 @@ export const App: React.FC = () => {
     if (res.success) {
       const updatedStatus = await window.lumenAPI.getCollabStatus();
       setCollabStatus(updatedStatus);
+      connectToCollab('127.0.0.1', res.port, res.token, userName);
     }
   };
 
@@ -376,20 +454,39 @@ export const App: React.FC = () => {
     setCollabStatus({ isHosting: false, clients: [] });
   };
 
-  const handleConnectRemote = (host: string, port: number, token: string, nick: string) => {
+  const connectToCollab = (host: string, port: number, token: string, nick: string) => {
     try {
       const ws = new WebSocket(`ws://${host}:${port}/?token=${token}&name=${encodeURIComponent(nick)}`);
       collabWsRef.current = ws;
 
       ws.onopen = () => {
         setIsConnectedRemote(true);
+        ws.send(JSON.stringify({ type: 'lumen:y-sync-request' }));
+        for (const [filePath, doc] of yDocsRef.current) {
+          ws.send(JSON.stringify({
+            type: 'lumen:y-sync-init',
+            filePath,
+            update: encodeUpdate(Y.encodeStateAsUpdate(doc)),
+          }));
+        }
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'lumen:code-change' && activeFilePath && msg.content) {
-            setFileContents((prev) => ({ ...prev, [activeFilePath]: msg.content }));
+          if (msg.type === 'lumen:y-update' && msg.filePath && msg.update) {
+            if (!yDocsRef.current.has(msg.filePath)) {
+              ensureCollabDocument(msg.filePath, '');
+            }
+            const existing = yDocsRef.current.get(msg.filePath);
+            if (!existing) return;
+            applyingRemoteUpdateRef.current = true;
+            Y.applyUpdate(existing, decodeUpdate(msg.update), 'remote');
+            const content = existing.getText('content').toString();
+            setFileContents((prev) => ({ ...prev, [msg.filePath]: content }));
+            setIsDirty((prev) => ({ ...prev, [msg.filePath]: true }));
+            void window.lumenAPI.writeFile(msg.filePath, content);
+            applyingRemoteUpdateRef.current = false;
           }
           if (msg.type === 'lumen:peer-list') {
             setCollabStatus((prev) => ({ ...prev, clients: msg.clients }));
@@ -405,6 +502,10 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Remote collab connection failed:', err);
     }
+  };
+
+  const handleConnectRemote = (host: string, port: number, token: string, nick: string) => {
+    connectToCollab(host, port, token, nick);
   };
 
   // Render Welcome Screen if no project is active
@@ -584,7 +685,7 @@ export const App: React.FC = () => {
       <ImageInsertModal
         isOpen={isImageModalOpen}
         onClose={() => setIsImageModalOpen(false)}
-        onInsertImage={handleInsertCode}
+        onInsertImage={handleInsertImage}
         projectPath={currentProject.path}
       />
 

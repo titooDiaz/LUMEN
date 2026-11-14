@@ -15,7 +15,7 @@
 ### 1. Interfaz Minimalista y Dividida en Tiempo Real
 - **Panel Izquierdo:** Editor de código LaTeX con Monaco Editor (el motor detrás de VS Code).
 - **Panel Derecho:** Previsualización reactiva de documentos PDF compilados mediante PDF.js con soporte High-DPI.
-- **Divisor Arrastrable:** Redimensionamiento fluido con memoria persistente y restablecimiento 50/50 con doble clic.
+- **Divisor Arrastrable:** Redimensionamiento fluido con memoria persistente y relstablecimiento 50/50 con doble clic.
 - **Tema Oscuro y Claro:** Paleta de colores profesional de baja saturación con acentos discretos y tipografía optimizada (*Inter* y *JetBrains Mono*).
 
 ### 2. Editor LaTeX de Nivel Profesional
@@ -103,7 +103,7 @@ Convierte los registros crudos de la terminal LaTeX en diagnósticos legibles:
 
 ### 1. Clonar o acceder al repositorio
 ```bash
-git clone 
+git clone https://github.com/titooDiaz/LUMEN.git
 ```
 
 ### 2. Instalar dependencias
