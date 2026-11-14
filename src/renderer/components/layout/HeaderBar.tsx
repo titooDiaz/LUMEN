@@ -5,6 +5,7 @@ import {
   Share2,
   Download,
   FolderTree,
+  FolderDown,
   Sun,
   Moon,
   CheckCircle2,
@@ -40,6 +41,7 @@ interface HeaderBarProps {
   collabPeerCount: number;
   isHostingCollab: boolean;
   onExportPdf: () => void;
+  onSaveProjectAs?: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   zoom: number;
@@ -70,6 +72,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   collabPeerCount,
   isHostingCollab,
   onExportPdf,
+  onSaveProjectAs,
   theme,
   onToggleTheme,
   zoom,
@@ -224,6 +227,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <Maximize2 className="w-3 h-3" />
           </button>
         </div>
+
+        {/* Save in Custom Folder / Save As */}
+        {onSaveProjectAs && (
+          <button
+            onClick={onSaveProjectAs}
+            className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition flex items-center space-x-1"
+            title="Guardar en carpeta personalizada... (Ctrl+Shift+S)"
+          >
+            <FolderDown className="w-4 h-4 text-primary" />
+          </button>
+        )}
 
         {/* Export PDF */}
         <button

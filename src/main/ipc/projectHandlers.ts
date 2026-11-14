@@ -1,8 +1,24 @@
 import { app } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { ProjectMetadata, TemplateId } from '../../shared/types';
 import { TEMPLATES } from '../../shared/templates';
+
+export function getDefaultProjectPath(): string {
+  try {
+    const docs = app.getPath('documents');
+    if (docs && fs.existsSync(docs)) return docs;
+  } catch {
+    // ignore
+  }
+  const home = os.homedir();
+  const docsEs = path.join(home, 'Documentos');
+  if (fs.existsSync(docsEs)) return docsEs;
+  const docsEn = path.join(home, 'Documents');
+  if (fs.existsSync(docsEn)) return docsEn;
+  return home;
+}
 
 function getStoragePath(): string {
   const dir = app.getPath('userData');
@@ -50,6 +66,11 @@ export async function createProjectFromTemplate(params: {
   projectName: string;
 }): Promise<ProjectMetadata> {
   const { templateId, targetPath, projectName } = params;
+  
+  if (!fs.existsSync(targetPath)) {
+    fs.mkdirSync(targetPath, { recursive: true });
+  }
+
   const projectDir = path.join(targetPath, projectName);
 
   if (!fs.existsSync(projectDir)) {
@@ -85,6 +106,65 @@ export async function createProjectFromTemplate(params: {
     id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     name: projectName,
     path: projectDir,
+    mainFile,
+    compiler: 'tectonic',
+    createdAt: new Date().toISOString(),
+    lastOpened: new Date().toISOString(),
+  };
+
+  saveRecentProject(metadata);
+  return metadata;
+}
+
+export async function copyProjectToDirectory(params: {
+  sourcePath: string;
+  targetDirectory: string;
+  newProjectName: string;
+}): Promise<ProjectMetadata> {
+  const { sourcePath, targetDirectory, newProjectName } = params;
+
+  if (!fs.existsSync(targetDirectory)) {
+    fs.mkdirSync(targetDirectory, { recursive: true });
+  }
+
+  const newProjectDir = path.join(targetDirectory, newProjectName);
+  if (!fs.existsSync(newProjectDir)) {
+    fs.mkdirSync(newProjectDir, { recursive: true });
+  }
+
+  // Copy all files recursively from sourcePath to newProjectDir, skipping node_modules and .git
+  const copyRecursive = (src: string, dest: string) => {
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      if (['.git', 'node_modules', '.cache'].includes(entry.name)) continue;
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+
+      if (entry.isDirectory()) {
+        if (!fs.existsSync(destPath)) {
+          fs.mkdirSync(destPath, { recursive: true });
+        }
+        copyRecursive(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  };
+
+  copyRecursive(sourcePath, newProjectDir);
+
+  // Identify mainFile
+  let mainFile = 'main.tex';
+  if (!fs.existsSync(path.join(newProjectDir, mainFile))) {
+    const entries = fs.readdirSync(newProjectDir);
+    const texFile = entries.find((e) => e.endsWith('.tex'));
+    if (texFile) mainFile = texFile;
+  }
+
+  const metadata: ProjectMetadata = {
+    id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    name: newProjectName,
+    path: newProjectDir,
     mainFile,
     compiler: 'tectonic',
     createdAt: new Date().toISOString(),

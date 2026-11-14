@@ -8,6 +8,7 @@ import {
   readProjectTreeRecursive,
   copyFileToProject,
   exportPdfDialog,
+  saveFileAsDialog,
   showPathInFileManager,
 } from './ipc/fsHandlers';
 import { detectCompilers, compileLatexProject } from './ipc/latexHandlers';
@@ -15,6 +16,8 @@ import {
   loadRecentProjects,
   saveRecentProject,
   createProjectFromTemplate,
+  getDefaultProjectPath,
+  copyProjectToDirectory,
 } from './ipc/projectHandlers';
 import { collabServerInstance } from './ipc/collabServer';
 
@@ -30,7 +33,7 @@ function createWindow() {
     title: 'LUMEN — Modern LaTeX Desktop Editor',
     backgroundColor: '#09090b',
     webPreferences: {
-      preload: path.join(currentDir, 'preload.mjs'),
+      preload: path.join(currentDir, 'preload.cjs'),
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true,
@@ -94,6 +97,14 @@ ipcMain.handle('fs:read-tree', async (_, projectPath: string) => {
   return readProjectTreeRecursive(projectPath);
 });
 
+ipcMain.handle('fs:path-exists', async (_, targetPath: string) => {
+  try {
+    return !!targetPath && fs.existsSync(targetPath);
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle('fs:read-file', async (_, filePath: string) => {
   return fs.readFileSync(filePath, 'utf-8');
 });
@@ -153,6 +164,10 @@ ipcMain.handle('latex:read-pdf-base64', async (_, pdfPath: string) => {
 });
 
 // Project & Templates
+ipcMain.handle('project:get-default-path', async () => {
+  return getDefaultProjectPath();
+});
+
 ipcMain.handle('project:get-recents', async () => {
   return loadRecentProjects();
 });
@@ -163,6 +178,10 @@ ipcMain.handle('project:save-metadata', async (_, project) => {
 
 ipcMain.handle('project:create-from-template', async (_, params) => {
   return createProjectFromTemplate(params);
+});
+
+ipcMain.handle('project:copy-to-directory', async (_, params) => {
+  return copyProjectToDirectory(params);
 });
 
 // Collaboration
@@ -186,6 +205,11 @@ ipcMain.handle('collab:get-ips', async () => {
 ipcMain.handle('system:export-pdf', async (_, pdfPath: string) => {
   if (!mainWindow) return false;
   return exportPdfDialog(pdfPath, mainWindow);
+});
+
+ipcMain.handle('system:save-file-as', async (_, params: { defaultPath: string; content: string }) => {
+  if (!mainWindow) return null;
+  return saveFileAsDialog(mainWindow, params.defaultPath, params.content);
 });
 
 ipcMain.handle('system:show-in-folder', async (_, targetPath: string) => {

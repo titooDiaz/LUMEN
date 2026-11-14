@@ -87,6 +87,7 @@ export interface LumenAPI {
   selectDirectory: () => Promise<string | null>;
   selectImage: () => Promise<{ path: string; name: string } | null>;
   readProjectTree: (projectPath: string) => Promise<ProjectFile[]>;
+  pathExists: (targetPath: string) => Promise<boolean>;
   readFile: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, content: string) => Promise<boolean>;
   createFile: (filePath: string, content?: string) => Promise<boolean>;
@@ -106,12 +107,18 @@ export interface LumenAPI {
   readPdfBase64: (pdfPath: string) => Promise<string | null>;
 
   // Projects & Templates
+  getDefaultProjectPath: () => Promise<string>;
   getRecentProjects: () => Promise<ProjectMetadata[]>;
   saveProjectMetadata: (project: ProjectMetadata) => Promise<void>;
   createProjectFromTemplate: (params: {
     templateId: TemplateId;
     targetPath: string;
     projectName: string;
+  }) => Promise<ProjectMetadata>;
+  copyProjectToDirectory: (params: {
+    sourcePath: string;
+    targetDirectory: string;
+    newProjectName: string;
   }) => Promise<ProjectMetadata>;
 
   // Real-time Collaboration (Embedded CRDT Server & Network)
@@ -122,6 +129,7 @@ export interface LumenAPI {
 
   // System
   exportPdf: (pdfPath: string) => Promise<boolean>;
+  saveFileAs: (params: { defaultPath: string; content: string }) => Promise<string | null>;
   showInFileManager: (targetPath: string) => Promise<void>;
 }
 

@@ -17,6 +17,7 @@ interface NewProjectModalProps {
   onClose: () => void;
   onCreate: (name: string, location: string, templateId: TemplateId) => Promise<void>;
   defaultLocation: string;
+  initialTemplate?: TemplateId;
 }
 
 export const NewProjectModal: React.FC<NewProjectModalProps> = ({
@@ -24,11 +25,24 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
   onClose,
   onCreate,
   defaultLocation,
+  initialTemplate = 'article',
 }) => {
   const [name, setName] = useState('Nuevo-Documento');
   const [location, setLocation] = useState(defaultLocation);
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateId>('article');
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateId>(initialTemplate);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (defaultLocation) {
+      setLocation(defaultLocation);
+    }
+  }, [defaultLocation, isOpen]);
+
+  React.useEffect(() => {
+    if (initialTemplate) {
+      setSelectedTemplate(initialTemplate);
+    }
+  }, [initialTemplate, isOpen]);
 
   if (!isOpen) return null;
 
@@ -45,13 +59,15 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !location) return;
+    if (!name.trim() || !location.trim()) return;
     setIsSubmitting(true);
     try {
-      await onCreate(name.trim(), location, selectedTemplate);
+      await onCreate(name.trim(), location.trim(), selectedTemplate);
       onClose();
     } catch (err) {
       console.error(err);
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`No se pudo crear el proyecto.\n\n${message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -140,21 +156,26 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
               />
             </div>
             <div>
-              <label className="text-muted-foreground font-medium block mb-1">Ubicación en Disco:</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-muted-foreground font-medium">Ubicación en Disco (Carpeta Personalizada):</label>
+              </div>
               <div className="flex space-x-1.5">
                 <input
                   type="text"
-                  readOnly
                   value={location}
-                  className="flex-1 bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground text-[11px] font-mono truncate"
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="/ruta/a/tu/carpeta"
+                  className="flex-1 bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground text-[11px] font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                  title="Escribe una ruta personalizada o selecciona una carpeta con el botón de la derecha"
                 />
                 <button
                   type="button"
                   onClick={handleSelectLocation}
-                  className="px-2.5 py-1.5 bg-secondary hover:bg-accent border border-border rounded-md font-medium text-foreground transition"
-                  title="Cambiar carpeta de destino"
+                  className="px-2.5 py-1.5 bg-secondary hover:bg-accent border border-border rounded-md font-medium text-foreground transition flex items-center space-x-1 shrink-0"
+                  title="Examinar y seleccionar carpeta personalizada"
                 >
                   <FolderOpen className="w-3.5 h-3.5" />
+                  <span className="text-[11px] hidden sm:inline">Examinar</span>
                 </button>
               </div>
             </div>

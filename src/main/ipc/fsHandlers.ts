@@ -124,6 +124,34 @@ export async function exportPdfDialog(pdfPath: string, mainWindow: BrowserWindow
   return true;
 }
 
+export async function saveFileAsDialog(
+  mainWindow: BrowserWindow,
+  defaultPath: string,
+  content: string
+): Promise<string | null> {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Guardar Archivo Como...',
+    defaultPath,
+    filters: [
+      { name: 'LaTeX Source (*.tex)', extensions: ['tex'] },
+      { name: 'BibTeX (*.bib)', extensions: ['bib'] },
+      { name: 'All Files (*.*)', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  const parentDir = path.dirname(result.filePath);
+  if (!fs.existsSync(parentDir)) {
+    fs.mkdirSync(parentDir, { recursive: true });
+  }
+
+  fs.writeFileSync(result.filePath, content, 'utf-8');
+  return result.filePath;
+}
+
 export async function showPathInFileManager(targetPath: string): Promise<void> {
   if (fs.existsSync(targetPath)) {
     shell.showItemInFolder(targetPath);

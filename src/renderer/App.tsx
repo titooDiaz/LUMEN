@@ -23,6 +23,7 @@ import { ImageInsertModal } from './components/modals/ImageInsertModal';
 import { MathInsertModal } from './components/modals/MathInsertModal';
 import { CollabModal } from './components/modals/CollabModal';
 import { NewProjectModal } from './components/modals/NewProjectModal';
+import { SaveAsModal } from './components/modals/SaveAsModal';
 import { X, FileCode } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -69,6 +70,11 @@ export const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isDiagnosticOpen, setIsDiagnosticOpen] = useState<boolean>(false);
   const [zoom, setZoom] = useState<number>(1.0);
+  // Incremented whenever the user asks to fit the PDF to the available width.
+  // The actual scale is computed inside PdfViewer, which knows the pane size
+  // and the real page width returned by PDF.js.
+  const [fitWidthSignal, setFitWidthSignal] = useState<number>(0);
+  const handleFitWidth = () => setFitWidthSignal((signal) => signal + 1);
 
   // Modals state
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
@@ -76,6 +82,11 @@ export const App: React.FC = () => {
   const [isMathModalOpen, setIsMathModalOpen] = useState(false);
   const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [isSaveAsModalOpen, setIsSaveAsModalOpen] = useState(false);
+  const [selectedModalTemplate, setSelectedModalTemplate] = useState<TemplateId>('article');
+  const [customProjectsFolder, setCustomProjectsFolder] = useState<string>(() => {
+    return localStorage.getItem('lumen_custom_projects_folder') || '';
+  });
 
   // Collaboration state
   const [collabStatus, setCollabStatus] = useState<CollabStatus>({
@@ -94,7 +105,37 @@ export const App: React.FC = () => {
   // Auto-compile debounce timer
   const compileTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initial load: fetch recent projects & detected compilers
+  // Use a ref to track compilation state without stale closure issues
+  const isCompilingRef = useRef<boolean>(false);
+
+  // Keep a ref to currentProject so auto-compile timer always has the latest value
+  const currentProjectRef = useRef<ProjectMetadata | null>(null);
+  currentProjectRef.current = currentProject;
+
+  // Latest editor state. Timers and Monaco keybindings capture props/state
+  // from the render in which they were created, so reading from these refs
+  // avoids compiling an outdated copy of the document.
+  const fileContentsRef = useRef<Record<string, string>>(fileContents);
+  fileContentsRef.current = fileContents;
+  const activeFilePathRef = useRef<string | null>(activeFilePath);
+  activeFilePathRef.current = activeFilePath;
+  const isDirtyRef = useRef<Record<string, boolean>>(isDirty);
+  isDirtyRef.current = isDirty;
+  const selectedCompilerRef = useRef<CompilerType>(selectedCompiler);
+  selectedCompilerRef.current = selectedCompiler;
+  const autoCompileRef = useRef<boolean>(autoCompile);
+  autoCompileRef.current = autoCompile;
+
+  // If a compile is requested while another one is running, keep only the
+  // latest request and run it as soon as the current compile finishes.
+  const pendingCompileRef = useRef<{
+    project: ProjectMetadata;
+    mainFile: string;
+    currentCode: string;
+    compiler: CompilerType;
+  } | null>(null);
+
+  // Initial load: fetch recent projects, detected compilers & system default path
   useEffect(() => {
     async function init() {
       try {
@@ -107,12 +148,38 @@ export const App: React.FC = () => {
 
         const recents = await window.lumenAPI.getRecentProjects();
         setRecentProjects(recents);
+
+        const defaultPath = await window.lumenAPI.getDefaultProjectPath();
+        const storedFolder = localStorage.getItem('lumen_custom_projects_folder') || '';
+        // A path saved by the web fallback (e.g. /home/usuario/Documentos)
+        // does not exist on this machine. Never keep an invalid folder, or
+        // project creation will fail with EACCES.
+        const storedFolderExists = storedFolder
+          ? await window.lumenAPI.pathExists(storedFolder)
+          : false;
+        const projectsFolder = storedFolderExists ? storedFolder : defaultPath;
+        localStorage.setItem('lumen_custom_projects_folder', projectsFolder);
+        setCustomProjectsFolder(projectsFolder);
       } catch (err) {
         console.error('Initialization error:', err);
       }
     }
     init();
   }, []);
+
+  // Global keyboard shortcuts (Ctrl+Shift+S for Save As)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        e.preventDefault();
+        if (currentProject) {
+          setIsSaveAsModalOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentProject]);
 
   // Refresh project files tree
   const refreshProjectTree = useCallback(async (projectPath: string) => {
@@ -126,6 +193,13 @@ export const App: React.FC = () => {
 
   // Open an existing project by directory path
   const handleOpenProject = async (projectPath: string) => {
+    // Discard any pending auto-compile from the previously open project.
+    if (compileTimerRef.current) {
+      clearTimeout(compileTimerRef.current);
+      compileTimerRef.current = null;
+    }
+    pendingCompileRef.current = null;
+
     try {
       const tree = await window.lumenAPI.readProjectTree(projectPath);
       setFiles(tree);
@@ -169,14 +243,21 @@ export const App: React.FC = () => {
     }
   };
 
-  // Compile project function
+  // Compile project function (uses refs to avoid stale closures and lost clicks)
   const triggerCompile = async (
     project: ProjectMetadata,
     mainFile: string,
     currentCode: string,
     compiler: CompilerType
   ) => {
-    if (isCompiling) return;
+    // Never drop a compile request: keep the latest one and execute it once
+    // the current compilation has finished.
+    if (isCompilingRef.current) {
+      pendingCompileRef.current = { project, mainFile, currentCode, compiler };
+      return;
+    }
+
+    isCompilingRef.current = true;
     setIsCompiling(true);
 
     try {
@@ -203,33 +284,87 @@ export const App: React.FC = () => {
       });
       setIsDiagnosticOpen(true);
     } finally {
+      isCompilingRef.current = false;
       setIsCompiling(false);
+
+      const pending = pendingCompileRef.current;
+      pendingCompileRef.current = null;
+      // Only replay the queued compile if the project is still open.
+      if (pending && currentProjectRef.current?.path === pending.project.path) {
+        void triggerCompile(
+          pending.project,
+          pending.mainFile,
+          pending.currentCode,
+          pending.compiler
+        );
+      }
     }
   };
 
   const handleManualCompile = () => {
-    if (!currentProject) return;
-    void compileCurrentProject(currentProject);
+    const project = currentProjectRef.current;
+    if (!project) return;
+    // Cancel any pending auto-compile timer and compile immediately
+    if (compileTimerRef.current) {
+      clearTimeout(compileTimerRef.current);
+      compileTimerRef.current = null;
+    }
+    void compileCurrentProject(project);
   };
 
-  const compileCurrentProject = async (project: ProjectMetadata) => {
+  const compileCurrentProject = async (
+    project: ProjectMetadata,
+    // Fresh content from the editor. React state updates are asynchronous, so
+    // after an edit the state still holds the previous version. Passing the
+    // new value explicitly prevents auto-compile from overwriting the file
+    // with stale text (which made the PDF look static).
+    override?: { filePath: string; content: string }
+  ) => {
     const mainFilePath = `${project.path}/${project.mainFile}`;
-    const activeContent = activeFilePath ? fileContents[activeFilePath] : undefined;
+    const activePath = override?.filePath ?? activeFilePathRef.current;
+    const latestContents = override
+      ? { ...fileContentsRef.current, [override.filePath]: override.content }
+      : fileContentsRef.current;
 
-    // Persist the file currently being edited before compiling. The compiler
-    // must always receive main.tex, even when a section or bibliography tab
-    // is active.
-    if (activeFilePath && activeContent !== undefined && isDirty[activeFilePath]) {
-      await window.lumenAPI.writeFile(activeFilePath, activeContent);
-      setIsDirty((prev) => ({ ...prev, [activeFilePath]: false }));
+    // Persist every dirty file before compiling, including the one that was
+    // just edited. The compiler must always receive main.tex, even when a
+    // section or bibliography tab is active.
+    const dirtyPaths = Object.keys(isDirtyRef.current).filter(
+      (filePath) => isDirtyRef.current[filePath]
+    );
+
+    const savedPaths: string[] = [];
+    for (const filePath of dirtyPaths) {
+      if (filePath === override?.filePath) continue;
+      const content = latestContents[filePath];
+      if (content === undefined) continue;
+      await window.lumenAPI.writeFile(filePath, content);
+      savedPaths.push(filePath);
+    }
+
+    // Save the freshly edited tab explicitly: React has not committed its
+    // state yet, so its entry may still be missing from the dirty map.
+    if (override) {
+      await window.lumenAPI.writeFile(override.filePath, override.content);
+      savedPaths.push(override.filePath);
+    }
+
+    if (savedPaths.length > 0) {
+      setIsDirty((prev) => {
+        const next = { ...prev };
+        for (const filePath of savedPaths) {
+          next[filePath] = false;
+        }
+        return next;
+      });
     }
 
     const mainContent =
-      activeFilePath === mainFilePath && activeContent !== undefined
-        ? activeContent
+      activePath === mainFilePath && latestContents[mainFilePath] !== undefined
+        ? latestContents[mainFilePath]
         : await window.lumenAPI.readFile(mainFilePath);
 
-    await triggerCompile(project, project.mainFile, mainContent, selectedCompiler);
+    await triggerCompile(project, project.mainFile, mainContent, selectedCompilerRef.current);
   };
 
   // Handle editor code change with auto-compile debounce
@@ -251,16 +386,19 @@ export const App: React.FC = () => {
     }
 
     // Auto-save & auto-compile
-    if (autoCompile && currentProject) {
+    if (autoCompileRef.current) {
       if (compileTimerRef.current) {
         clearTimeout(compileTimerRef.current);
       }
+      const editedPath = activeFilePath;
       compileTimerRef.current = setTimeout(async () => {
-        // Save file to disk
-        await window.lumenAPI.writeFile(activeFilePath, newCode);
-        setIsDirty((prev) => ({ ...prev, [activeFilePath]: false }));
-        // Compile the actual project entry point, not whichever tab is active.
-        await compileCurrentProject(currentProject);
+        compileTimerRef.current = null;
+        const project = currentProjectRef.current;
+        if (!project) return;
+        // Pass the freshly edited text explicitly. The state update for this
+        // keystroke has not been committed yet, so compiling from state would
+        // restore the previous version and leave the preview outdated.
+        await compileCurrentProject(project, { filePath: editedPath, content: newCode });
       }, 900);
     }
   };
@@ -404,14 +542,51 @@ export const App: React.FC = () => {
       targetPath: location,
       projectName: name,
     });
-    handleOpenProject(metadata.path);
+
+    // Only remember the folder once it is known to be writable.
+    localStorage.setItem('lumen_custom_projects_folder', location);
+    setCustomProjectsFolder(location);
+
+    await handleOpenProject(metadata.path);
   };
 
-  // Quick create from welcome screen
+  // Quick create from welcome screen opens the modal with pre-selected template
   const handleQuickCreate = async (templateId: TemplateId) => {
-    const defaultDir = '/home/miguel/Documents';
-    const name = `Proyecto-${templateId}-${Date.now().toString().slice(-4)}`;
-    await handleCreateProject(name, defaultDir, templateId);
+    setSelectedModalTemplate(templateId);
+    setIsNewProjectModalOpen(true);
+  };
+
+  // Save current project copy in a custom folder
+  const handleSaveProjectAs = async (newProjectName: string, targetDirectory: string) => {
+    if (!currentProject) return;
+
+    // Save active changes first
+    await handleSaveCurrentFile();
+
+    const metadata = await window.lumenAPI.copyProjectToDirectory({
+      sourcePath: currentProject.path,
+      targetDirectory,
+      newProjectName,
+    });
+
+    localStorage.setItem('lumen_custom_projects_folder', targetDirectory);
+    setCustomProjectsFolder(targetDirectory);
+
+    await handleOpenProject(metadata.path);
+  };
+
+  // Save active file (.tex) as a standalone file in any custom folder
+  const handleSaveActiveFileAs = async () => {
+    if (!activeFilePath) return;
+    const currentContent = fileContents[activeFilePath] || '';
+    const defaultFileName = activeFilePath.split('/').pop() || 'documento.tex';
+    const savedPath = await window.lumenAPI.saveFileAs({
+      defaultPath: defaultFileName,
+      content: currentContent,
+    });
+    if (savedPath && currentProject) {
+      await refreshProjectTree(currentProject.path);
+    }
   };
 
   // Open directory dialog
@@ -527,7 +702,8 @@ export const App: React.FC = () => {
           isOpen={isNewProjectModalOpen}
           onClose={() => setIsNewProjectModalOpen(false)}
           onCreate={handleCreateProject}
-          defaultLocation="/home/miguel/Documents"
+          defaultLocation={customProjectsFolder}
+          initialTemplate={selectedModalTemplate}
         />
       </div>
     );
@@ -561,11 +737,12 @@ export const App: React.FC = () => {
         collabPeerCount={collabStatus.clients.length}
         isHostingCollab={collabStatus.isHosting}
         onExportPdf={handleExportPdf}
+        onSaveProjectAs={() => setIsSaveAsModalOpen(true)}
         theme={theme}
         onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         zoom={zoom}
         onZoomChange={setZoom}
-        onFitWidth={() => setZoom(1.1)}
+        onFitWidth={handleFitWidth}
         onBackToWelcome={() => setCurrentProject(null)}
       />
 
@@ -581,6 +758,7 @@ export const App: React.FC = () => {
             onCreateFolder={handleCreateFolder}
             onDeletePath={handleDeletePath}
             onRenamePath={handleRenamePath}
+            onSaveProjectAs={() => setIsSaveAsModalOpen(true)}
             projectPath={currentProject.path}
           />
         )}
@@ -666,7 +844,8 @@ export const App: React.FC = () => {
               isCompiling={isCompiling}
               zoom={zoom}
               onZoomChange={setZoom}
-              onFitWidth={() => setZoom(1.1)}
+              onFitWidth={handleFitWidth}
+              fitWidthSignal={fitWidthSignal}
               errorCount={compileResult?.errors.length || 0}
               onOpenDiagnostics={() => setIsDiagnosticOpen(true)}
               onManualCompile={handleManualCompile}
@@ -711,7 +890,18 @@ export const App: React.FC = () => {
         isOpen={isNewProjectModalOpen}
         onClose={() => setIsNewProjectModalOpen(false)}
         onCreate={handleCreateProject}
-        defaultLocation="/home/miguel/Documents"
+        defaultLocation={customProjectsFolder}
+        initialTemplate={selectedModalTemplate}
+      />
+
+      <SaveAsModal
+        isOpen={isSaveAsModalOpen}
+        onClose={() => setIsSaveAsModalOpen(false)}
+        currentProjectName={currentProject.name}
+        defaultLocation={customProjectsFolder || currentProject.path.substring(0, currentProject.path.lastIndexOf('/'))}
+        activeFileName={activeFileName}
+        onSaveProjectAs={handleSaveProjectAs}
+        onSaveActiveFileAs={handleSaveActiveFileAs}
       />
     </div>
   );

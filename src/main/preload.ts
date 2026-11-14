@@ -7,6 +7,7 @@ const api: LumenAPI = {
   selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
   selectImage: () => ipcRenderer.invoke('dialog:select-image'),
   readProjectTree: (projectPath: string) => ipcRenderer.invoke('fs:read-tree', projectPath),
+  pathExists: (targetPath: string) => ipcRenderer.invoke('fs:path-exists', targetPath),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
   writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:write-file', filePath, content),
   createFile: (filePath: string, content?: string) => ipcRenderer.invoke('fs:create-file', filePath, content),
@@ -23,10 +24,13 @@ const api: LumenAPI = {
   readPdfBase64: (pdfPath: string) => ipcRenderer.invoke('latex:read-pdf-base64', pdfPath),
 
   // Projects & Templates
+  getDefaultProjectPath: () => ipcRenderer.invoke('project:get-default-path'),
   getRecentProjects: () => ipcRenderer.invoke('project:get-recents'),
   saveProjectMetadata: (project: ProjectMetadata) => ipcRenderer.invoke('project:save-metadata', project),
   createProjectFromTemplate: (params: { templateId: TemplateId; targetPath: string; projectName: string }) =>
     ipcRenderer.invoke('project:create-from-template', params),
+  copyProjectToDirectory: (params: { sourcePath: string; targetDirectory: string; newProjectName: string }) =>
+    ipcRenderer.invoke('project:copy-to-directory', params),
 
   // Real-time Collaboration
   startCollabServer: (params: { port?: number; token?: string }) =>
@@ -37,6 +41,8 @@ const api: LumenAPI = {
 
   // System
   exportPdf: (pdfPath: string) => ipcRenderer.invoke('system:export-pdf', pdfPath),
+  saveFileAs: (params: { defaultPath: string; content: string }) =>
+    ipcRenderer.invoke('system:save-file-as', params),
   showInFileManager: (targetPath: string) => ipcRenderer.invoke('system:show-in-folder', targetPath),
 };
 

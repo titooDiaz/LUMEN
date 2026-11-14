@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ChevronDown,
   FolderPlus,
+  FolderDown,
   FilePlus,
   FolderTree,
   ExternalLink,
@@ -26,6 +27,7 @@ interface SidebarProps {
   onCreateFolder: (parentDir: string) => void;
   onDeletePath: (path: string) => void;
   onRenamePath: (oldPath: string, newPath: string) => void;
+  onSaveProjectAs?: () => void;
   projectPath: string;
 }
 
@@ -37,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCreateFolder,
   onDeletePath,
   onRenamePath,
+  onSaveProjectAs,
   projectPath,
 }) => {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
@@ -215,6 +218,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <FolderPlus className="w-3.5 h-3.5" />
           </button>
+          {onSaveProjectAs && (
+            <button
+              onClick={onSaveProjectAs}
+              className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition"
+              title="Guardar proyecto en carpeta personalizada..."
+            >
+              <FolderDown className="w-3.5 h-3.5 text-primary" />
+            </button>
+          )}
           <button
             onClick={() => window.lumenAPI.showInFileManager(projectPath)}
             className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition"

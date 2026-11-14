@@ -1,22 +1,175 @@
 import { LumenAPI, CompilerInfo, ProjectMetadata, TemplateId, CollabStatus, CompilationResult, ProjectFile } from '../../shared/types';
 import { TEMPLATES } from '../../shared/templates';
 
+function escapePdfText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ');
+}
+
+function cleanLatexText(text: string): string {
+  return text
+    .replace(/\\textbf\{([^}]+)\}/g, '$1')
+    .replace(/\\textit\{([^}]+)\}/g, '$1')
+    .replace(/\\texttt\{([^}]+)\}/g, '$1')
+    .replace(/\\large\s*/g, '')
+    .replace(/\\LARGE\s*/g, '')
+    .replace(/\\bfseries\s*/g, '')
+    .replace(/\\uppercase\s*/g, '')
+    .replace(/\\\\/g, ' ')
+    .replace(/\\,/g, ' ')
+    .replace(/[\$\\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function generateDynamicPdfBase64(sourceCode: string, projectName: string): string {
+  const titleMatch = sourceCode.match(/\\title(?:\[[^\]]*\])?\{([\s\S]*?)\}/);
+  const title = titleMatch ? cleanLatexText(titleMatch[1]) : projectName;
+
+  const authorMatch = sourceCode.match(/\\author(?:\[[^\]]*\])?\{([\s\S]*?)\}/);
+  const author = authorMatch ? cleanLatexText(authorMatch[1]) : 'Autor';
+
+  const lines: { text: string; isHeading: boolean }[] = [];
+  
+  const abstractMatch = sourceCode.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
+  if (abstractMatch) {
+    lines.push({ text: 'Resumen (Abstract)', isHeading: true });
+    const absText = cleanLatexText(abstractMatch[1]);
+    for (let i = 0; i < absText.length; i += 75) {
+      lines.push({ text: absText.substring(i, i + 75), isHeading: false });
+    }
+  }
+
+  const bodyText = sourceCode.replace(/\\begin\{abstract\}[\s\S]*?\\end\{abstract\}/, '');
+  const sectionRegex = /\\(?:section|chapter|subsection|begin\{frame\})\*?\{?([^}\n]*)\}?/g;
+  let secMatch;
+  let secCount = 0;
+  while ((secMatch = sectionRegex.exec(bodyText)) !== null && lines.length < 35) {
+    const rawTitle = secMatch[1] ? cleanLatexText(secMatch[1]) : '';
+    if (rawTitle && rawTitle.length > 1) {
+      secCount++;
+      lines.push({ text: `${secCount}. ${rawTitle}`, isHeading: true });
+    }
+  }
+
+  if (lines.length === 0) {
+    const cleanBody = cleanLatexText(
+      sourceCode
+        .replace(/\\[a-zA-Z]+(\[[^\]]*\])?(\{[^}]*\})?/g, '')
+        .replace(/[{}]/g, '')
+    );
+    for (let i = 0; i < Math.min(cleanBody.length, 600); i += 75) {
+      lines.push({ text: cleanBody.substring(i, i + 75), isHeading: false });
+    }
+  }
+
+  let stream = 'BT\n';
+  stream += '/F2 18 Tf\n0 0 0 rg\n';
+  stream += `50 780 Td\n(${escapePdfText(title.substring(0, 60))}) Tj\n`;
+  stream += 'ET\n';
+
+  stream += 'BT\n/F1 10 Tf\n0.3 0.3 0.3 rg\n';
+  const now = new Date().toLocaleTimeString();
+  stream += `50 758 Td\n(${escapePdfText(author.substring(0, 45))}  |  Compilado: ${now}) Tj\n`;
+  stream += 'ET\n';
+
+  stream += '0.5 w\n0.7 0.7 0.7 RG\n50 746 m 545 746 l S\n';
+
+  let y = 720;
+  for (const item of lines) {
+    if (y < 60) break;
+    stream += 'BT\n';
+    if (item.isHeading) {
+      y -= 6;
+      stream += '/F2 12 Tf\n0.1 0.1 0.1 rg\n';
+    } else {
+      stream += '/F1 10 Tf\n0.25 0.25 0.25 rg\n';
+    }
+    stream += `50 ${y} Td\n(${escapePdfText(item.text)}) Tj\n`;
+    stream += 'ET\n';
+    y -= item.isHeading ? 18 : 13;
+  }
+
+  stream += 'BT\n/F1 8 Tf\n0.5 0.5 0.5 rg\n50 28 Td\n(LUMEN Modern LaTeX Desktop Editor  |  Previsualizacion Reactiva en Tiempo Real) Tj\nET\n';
+
+  const streamBytes = new TextEncoder().encode(stream);
+  const streamLen = streamBytes.length;
+
+  const pdf = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Length ${streamLen} >>
+stream
+${stream}
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000244 00000 n 
+0000000318 00000 n 
+0000000397 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+${470 + streamLen}
+%%EOF`;
+
+  const bytes = new TextEncoder().encode(pdf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
 // Check if native Electron API is present
 export function initLumenAPI(): void {
   if (typeof window !== 'undefined' && !window.lumenAPI) {
-    console.warn('LUMEN: Running in Web / Dev Mode. Initializing High-Fidelity Web Fallback.');
+    if (/Electron/i.test(navigator.userAgent)) {
+      // This is a hard failure: the native preload bridge did not load, so
+      // compilation would silently use the mock PDF generator instead of the
+      // real LaTeX compiler. Keep the app usable but make the problem obvious.
+      console.error(
+        'LUMEN: The Electron preload bridge is unavailable. LaTeX compilation ' +
+        'will use the web mock. Check that dist-electron/preload.cjs exists and ' +
+        'that BrowserWindow.webPreferences.preload points to it.'
+      );
+    } else {
+      console.warn('LUMEN: Running in Web / Dev Mode. Initializing High-Fidelity Web Fallback.');
+    }
 
     // In-memory virtual filesystem for web preview
     const vfs: Record<string, string> = {
-      '/home/miguel/Documents/Proyecto-Demo/main.tex': TEMPLATES.article.defaultMainContent,
-      '/home/miguel/Documents/Proyecto-Demo/sections/introduction.tex': '% Introducción...',
+      '/home/usuario/Documentos/Proyecto-Demo/main.tex': TEMPLATES.article.defaultMainContent,
+      '/home/usuario/Documentos/Proyecto-Demo/sections/introduction.tex': '% Introducción...',
     };
 
     const mockCompilers: CompilerInfo[] = [
       {
         type: 'tectonic',
         name: 'Tectonic (Fast & Portable)',
-        path: '/home/miguel/.local/bin/tectonic',
+        path: 'tectonic',
         available: true,
         version: '0.17.0',
         isDefault: true,
@@ -41,10 +194,10 @@ export function initLumenAPI(): void {
 
     window.lumenAPI = {
       isNative: false,
-      selectDirectory: async () => '/home/miguel/Documents/Proyecto-Demo',
+      selectDirectory: async () => '/home/usuario/Documentos/Proyecto-Demo',
       selectImage: async () => ({
-        path: '/home/miguel/Pictures/figure1.png',
-        name: 'figure1.png',
+        path: '/home/usuario/Imágenes/figura1.png',
+        name: 'figura1.png',
       }),
       readProjectTree: async (projectPath: string): Promise<ProjectFile[]> => {
         const items: ProjectFile[] = [
@@ -80,6 +233,7 @@ export function initLumenAPI(): void {
         ];
         return items;
       },
+      pathExists: async () => true,
       readFile: async (filePath: string) => {
         return vfs[filePath] || TEMPLATES.article.defaultMainContent;
       },
@@ -112,19 +266,28 @@ export function initLumenAPI(): void {
       getCompilers: async () => mockCompilers,
       compile: async (params): Promise<CompilationResult> => {
         const startTime = Date.now();
-        // In web fallback mode, we synthesize a clean PDF or return success
+        const mainPath = `${params.projectPath}/${params.mainFile}`;
+        const source = params.sourceCode !== undefined ? params.sourceCode : (vfs[mainPath] || '');
+        if (params.sourceCode !== undefined) {
+          vfs[mainPath] = params.sourceCode;
+        }
+
+        const projectName = params.projectPath.split('/').pop() || 'Proyecto';
+        const dynamicBase64 = generateDynamicPdfBase64(source, projectName);
+
         return {
           success: true,
           pdfPath: `${params.projectPath}/output/main.pdf`,
-          pdfBufferBase64: 'JVBERi0xLjUKJcfsj6IKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4NQo+PgpzdHJlYW0KQlQKL0YxIDI0IFRmCjEwMCA3NTAgVGROCihMVU1FTiAtIE1vZGVybiBMYVRlWCBFZGl0b3IpIFRqCjEwMCA3MDAgVGROCihDb21waWxhZG8gY29uIMOpeGl0bykgVGoKRVQKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTggMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTI3IDAwMDAwIG4gCjAwMDAwMDAyMjUgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgozNjAKJSVFT0YK',
-          log: `[LUMEN Engine: ${params.compiler}]\nDocumento compilado con éxito.\nSalida generada: ${params.projectPath}/output/main.pdf`,
+          pdfBufferBase64: dynamicBase64,
+          log: `[LUMEN Web Engine: ${params.compiler}]\nDocumento compilado con éxito en tiempo real.\nSalida generada: ${params.projectPath}/output/main.pdf`,
           errors: [],
           warnings: [],
-          durationMs: Date.now() - startTime + 380,
+          durationMs: Date.now() - startTime + 80,
           timestamp: new Date().toISOString(),
         };
       },
       readPdfBase64: async () => null,
+      getDefaultProjectPath: async () => '/home/usuario/Documentos',
       getRecentProjects: async (): Promise<ProjectMetadata[]> => {
         const saved = localStorage.getItem('lumen_recent_projects');
         if (saved) {
@@ -138,7 +301,7 @@ export function initLumenAPI(): void {
           {
             id: 'demo-1',
             name: 'Proyecto-Demo',
-            path: '/home/miguel/Documents/Proyecto-Demo',
+            path: '/home/usuario/Documentos/Proyecto-Demo',
             mainFile: 'main.tex',
             compiler: 'tectonic',
             createdAt: new Date().toISOString(),
@@ -175,6 +338,33 @@ export function initLumenAPI(): void {
         localStorage.setItem('lumen_recent_projects', JSON.stringify(list));
 
         return metadata;
+      },
+      copyProjectToDirectory: async (params): Promise<ProjectMetadata> => {
+        const newProjectPath = `${params.targetDirectory}/${params.newProjectName}`;
+        Object.keys(vfs).forEach((oldKey) => {
+          if (oldKey.startsWith(params.sourcePath)) {
+            const rel = oldKey.substring(params.sourcePath.length);
+            vfs[`${newProjectPath}${rel}`] = vfs[oldKey];
+          }
+        });
+        const metadata: ProjectMetadata = {
+          id: `proj-${Date.now()}`,
+          name: params.newProjectName,
+          path: newProjectPath,
+          mainFile: 'main.tex',
+          compiler: 'tectonic',
+          createdAt: new Date().toISOString(),
+          lastOpened: new Date().toISOString(),
+        };
+        const saved = localStorage.getItem('lumen_recent_projects');
+        let list: ProjectMetadata[] = saved ? JSON.parse(saved) : [];
+        list.unshift(metadata);
+        localStorage.setItem('lumen_recent_projects', JSON.stringify(list));
+        return metadata;
+      },
+      saveFileAs: async (params) => {
+        vfs[params.defaultPath] = params.content;
+        return params.defaultPath;
       },
       startCollabServer: async (params) => {
         collabHosting = true;

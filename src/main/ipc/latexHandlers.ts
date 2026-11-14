@@ -7,11 +7,29 @@ import { CompilationResult, CompilerInfo, CompilerType, DiagnosticItem } from '.
 
 const execAsync = promisify(exec);
 
-// Find tectonic path (check PATH and ~/.local/bin/tectonic)
+// Find tectonic path (check environment, project bin, resources, ~/.local/bin and system PATH)
 function getTectonicPath(): string | null {
-  const localBin = path.join(os.homedir(), '.local', 'bin', 'tectonic');
-  if (fs.existsSync(localBin)) {
-    return localBin;
+  const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+  const candidates: (string | undefined)[] = [
+    process.env.TECTONIC_PATH,
+    path.join(process.cwd(), 'bin', 'tectonic'),
+    path.join(currentDir, '../../bin/tectonic'),
+    path.join(currentDir, '../bin/tectonic'),
+    path.join((process as any).resourcesPath || '', 'bin', 'tectonic'),
+    path.join(os.homedir(), '.local', 'bin', 'tectonic'),
+    '/usr/local/bin/tectonic',
+    '/usr/bin/tectonic',
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch {
+        return candidate;
+      }
+    }
   }
   return null;
 }
@@ -22,7 +40,7 @@ export async function detectCompilers(): Promise<CompilerInfo[]> {
   // Check tectonic
   const tectonicLocal = getTectonicPath();
   try {
-    const cmd = tectonicLocal || 'tectonic';
+    const cmd = tectonicLocal ? `"${tectonicLocal}"` : 'tectonic';
     const { stdout } = await execAsync(`${cmd} --version`);
     const versionMatch = stdout.match(/Tectonic\s+([\d.]+)/i);
     compilers.push({
@@ -263,13 +281,33 @@ export async function compileLatexProject(params: {
     let stdoutData = '';
     let stderrData = '';
 
+    const binDir = path.join(process.cwd(), 'bin');
+    const localBin = path.join(os.homedir(), '.local', 'bin');
+    const envPath = `${binDir}:${localBin}:/usr/local/bin:${process.env.PATH || ''}`;
+
     const proc = spawn(binary, cmdArgs, {
       cwd: projectPath,
       env: {
         ...process.env,
-        PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH}`,
+        PATH: envPath,
       },
     });
+
+    // Close stdin immediately so compiler never hangs waiting for input
+    try {
+      proc.stdin?.end();
+    } catch {
+      // ignore
+    }
+
+    // Watchdog timeout (30 seconds) to prevent compiler from hanging indefinitely
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+    }, 30000);
 
     proc.stdout.on('data', (chunk) => {
       stdoutData += chunk.toString();
@@ -280,6 +318,7 @@ export async function compileLatexProject(params: {
     });
 
     proc.on('error', (err) => {
+      clearTimeout(timer);
       resolve({
         success: false,
         log: `Failed to launch compiler (${binary}): ${err.message}\n` +
@@ -298,6 +337,7 @@ export async function compileLatexProject(params: {
     });
 
     proc.on('close', (code) => {
+      clearTimeout(timer);
       const fullLog = stdoutData + '\n' + stderrData;
       const logPath = path.join(outputDir, `${baseName}.log`);
 
@@ -311,12 +351,39 @@ export async function compileLatexProject(params: {
       }
 
       const { errors, warnings } = parseLatexLog(logContent, path.basename(mainFilePath));
-      const pdfExists = fs.existsSync(expectedPdfPath);
+      
+      let actualPdfPath = expectedPdfPath;
+      if (!fs.existsSync(actualPdfPath)) {
+        try {
+          const files = fs.readdirSync(outputDir);
+          const pdfFile = files.find((f) => f.endsWith('.pdf'));
+          if (pdfFile) {
+            actualPdfPath = path.join(outputDir, pdfFile);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      const pdfExists = fs.existsSync(actualPdfPath);
+
+      // Successful compilation when PDF is created and process completed cleanly (or with warnings)
+      const success = pdfExists && (code === 0 || errors.length === 0);
+
+      // If compilation failed and no specific errors were parsed from log, show process output
+      if (!pdfExists && errors.length === 0) {
+        errors.push({
+          id: 'compilation-failed',
+          file: path.basename(mainFilePath),
+          line: 1,
+          severity: 'error',
+          message: (stderrData || stdoutData || `La compilación de LaTeX finalizó con error (código de salida ${code})`).trim(),
+        });
+      }
 
       let pdfBufferBase64: string | undefined = undefined;
       if (pdfExists) {
         try {
-          const pdfBuffer = fs.readFileSync(expectedPdfPath);
+          const pdfBuffer = fs.readFileSync(actualPdfPath);
           pdfBufferBase64 = pdfBuffer.toString('base64');
         } catch (readErr) {
           console.error('Error reading PDF:', readErr);
@@ -326,8 +393,8 @@ export async function compileLatexProject(params: {
       const durationMs = Date.now() - startTime;
 
       resolve({
-        success: pdfExists && errors.length === 0,
-        pdfPath: pdfExists ? expectedPdfPath : undefined,
+        success,
+        pdfPath: pdfExists ? actualPdfPath : undefined,
         pdfBufferBase64,
         log: logContent,
         errors,

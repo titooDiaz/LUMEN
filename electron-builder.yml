@@ -9,6 +9,7 @@ npmRebuild: false
 files:
   - dist
   - dist-electron
+  - bin
 linux:
   target:
     - AppImage

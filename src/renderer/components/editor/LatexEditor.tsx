@@ -24,6 +24,14 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
 }) => {
   const monacoInstanceRef = useRef<Monaco | null>(null);
 
+  // Monaco commands are registered only once (on mount). Keep the latest
+  // callbacks in refs so Ctrl+Enter / Ctrl+S always act on the currently open
+  // project instead of the one that was active when the editor mounted.
+  const onCompileRef = useRef(onCompile);
+  onCompileRef.current = onCompile;
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+
   const handleEditorDidMount = (
     editor: monacoType.editor.IStandaloneCodeEditor,
     monaco: Monaco
@@ -192,11 +200,11 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
 
     // Keybindings: Ctrl+Enter (Compile), Ctrl+S (Save)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      onCompile();
+      onCompileRef.current();
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      onSave();
+      onSaveRef.current();
     });
   };
 

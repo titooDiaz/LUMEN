@@ -6,10 +6,8 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
-# Ensure ~/.local/bin is in PATH for tectonic
-if [ -d "$HOME/.local/bin" ]; then
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+# Ensure bin and ~/.local/bin are in PATH for tectonic
+export PATH="$DIR/bin:$HOME/.local/bin:$PATH"
 
 echo "=========================================="
 echo "  LUMEN — Modern LaTeX Desktop Editor"
@@ -32,7 +30,7 @@ case "$1" in
   *)
     if [ -f "./node_modules/electron/dist/electron" ]; then
       echo "Iniciando aplicación de escritorio LUMEN..."
-      ./node_modules/.bin/electron .
+      ./node_modules/.bin/electron . "$@" || ./node_modules/.bin/electron --no-sandbox . "$@"
     else
       echo "Lanzando LUMEN en el entorno local..."
       npx vite preview --port 5173 --host
