@@ -161,75 +161,13 @@ export const VisualToolbar: React.FC<VisualToolbarProps> = ({
       {/* Grupo: Matemáticas */}
       <div className="relative pr-1 border-r border-border">
         <button
-          onClick={() => toggleDropdown('math')}
+          onClick={onOpenMathModal}
           className="flex items-center space-x-1 px-1.5 py-1 rounded hover:bg-accent hover:text-foreground transition"
           title="Fórmulas y Ecuaciones Matemáticas"
         >
           <Sigma className="w-3.5 h-3.5 text-amber-400" />
           <span>Matemáticas</span>
-          <ChevronDown className="w-3 h-3 opacity-60" />
         </button>
-
-        {activeDropdown === 'math' && (
-          <div className="absolute top-8 left-0 w-52 bg-popover border border-border shadow-lg rounded-md py-1 z-50 text-foreground">
-            <button
-              onClick={onOpenMathModal}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2 font-medium text-primary"
-            >
-              <Sigma className="w-3.5 h-3.5" />
-              <span>Constructor de Ecuaciones...</span>
-            </button>
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={() => handleInsert('\n\\begin{equation}\n  ${1:E = mc^2}\n  \\label{eq:${2:etiqueta}}\n\\end{equation}\n')}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <span>Ecuación numerada</span>
-            </button>
-            <button
-              onClick={() => handleInsert('$${1:x = \\alpha + \\beta}$ ')}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <span>Ecuación en línea ($...$)</span>
-            </button>
-            <button
-              onClick={() => handleInsert('\\frac{${1:numerador}}{${2:denominador}} ')}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <Divide className="w-3.5 h-3.5" />
-              <span>Fracción (\frac)</span>
-            </button>
-            <button
-              onClick={() =>
-                handleInsert(
-                  '\n\\begin{pmatrix}\n  ${1:a_{11}} & ${2:a_{12}} \\\\\n  ${3:a_{21}} & ${4:a_{22}}\n\\end{pmatrix}\n'
-                )
-              }
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <Grid className="w-3.5 h-3.5" />
-              <span>Matriz 2x2 (\pmatrix)</span>
-            </button>
-            <button
-              onClick={() => handleInsert('\\sqrt{${1:x}} ')}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <span>Raíz cuadrada (\sqrt)</span>
-            </button>
-            <button
-              onClick={() => handleInsert('\\int_{${1:0}}^{${2:\\infty}} ${3:f(x)} \\, dx ')}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <span>Integral definida (\int)</span>
-            </button>
-            <button
-              onClick={() => handleInsert('\\sum_{${1:i=1}}^{${2:n}} ${3:x_i} ')}
-              className="w-full text-left px-3 py-1.5 hover:bg-accent flex items-center space-x-2"
-            >
-              <span>Sumatorio (\sum)</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Grupo: Listas */}

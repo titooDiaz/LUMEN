@@ -3,6 +3,9 @@ import { CompilerType, LumenAPI, ProjectMetadata, TemplateId } from '../shared/t
 
 const api: LumenAPI = {
   isNative: true,
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  openExternal: (url: string) => ipcRenderer.invoke('system:open-external', url),
   // Filesystem
   selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
   selectImage: () => ipcRenderer.invoke('dialog:select-image'),

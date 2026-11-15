@@ -17,7 +17,7 @@ import {
   Users,
   Terminal,
 } from 'lucide-react';
-import { CompilerType, CompilerInfo } from '../../../shared/types';
+import { CompilerType, CompilerInfo, CollabUser } from '../../../shared/types';
 
 interface HeaderBarProps {
   projectName: string;
@@ -40,6 +40,9 @@ interface HeaderBarProps {
   onOpenCollab: () => void;
   collabPeerCount: number;
   isHostingCollab: boolean;
+  collabParticipants: CollabUser[];
+  currentUserName: string;
+  isConnectedRemote: boolean;
   onExportPdf: () => void;
   onSaveProjectAs?: () => void;
   theme: 'dark' | 'light';
@@ -71,6 +74,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenCollab,
   collabPeerCount,
   isHostingCollab,
+  collabParticipants,
+  currentUserName,
+  isConnectedRemote,
   onExportPdf,
   onSaveProjectAs,
   theme,
@@ -200,6 +206,15 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
       {/* Right section: PDF Zoom controls, Export, Collaboration, Diagnostics, Theme */}
       <div className="flex items-center space-x-1.5 no-drag">
+        {(isHostingCollab || isConnectedRemote) && (
+          <div className="flex items-center -space-x-2 mr-1" title={`${collabParticipants.length} participante(s) conectado(s)`}>
+            {isHostingCollab && <span className="relative z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-primary/15 text-base" title={`${currentUserName} (anfitrión)`}>👻</span>}
+            {collabParticipants.slice(0, 4).map((person, index) => (
+              <span key={person.id} className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 border-background text-sm shadow-sm" style={{ backgroundColor: `${person.color}30`, zIndex: 8 - index }} title={`${person.name}${person.cursor ? ` · línea ${person.cursor.lineNumber}` : ''}`}>👻</span>
+            ))}
+            {collabParticipants.length > 4 && <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-secondary text-[9px] font-bold">+{collabParticipants.length - 4}</span>}
+          </div>
+        )}
         {/* PDF Zoom */}
         <div className="flex items-center bg-secondary/60 border border-border rounded-md px-1 py-0.5">
           <button

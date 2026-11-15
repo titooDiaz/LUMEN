@@ -14,6 +14,10 @@ import {
   Trash2,
   Cpu,
   CheckCircle2,
+  RefreshCw,
+  Download,
+  AlertCircle,
+  Github,
 } from 'lucide-react';
 import { CompilerInfo, ProjectMetadata, TemplateId } from '../../../shared/types';
 
@@ -26,6 +30,9 @@ interface WelcomeScreenProps {
   compilers: CompilerInfo[];
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  updateState: { checking: boolean; installing: boolean; available: boolean; version: string; canInstall: boolean; message: string };
+  onCheckUpdates: () => void;
+  onInstallUpdate: () => void;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
@@ -37,6 +44,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   compilers,
   theme,
   onToggleTheme,
+  updateState,
+  onCheckUpdates,
+  onInstallUpdate,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'favorites'>('all');
@@ -53,7 +63,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const availableCompilers = compilers.filter((c) => c.available);
 
   return (
-    <div className="w-full h-full bg-background flex flex-col overflow-y-auto select-none">
+    <div className="relative w-full h-full bg-background flex flex-col overflow-y-auto select-none">
       {/* Top Banner / Window Drag */}
       <div className="h-12 border-b border-border px-6 flex items-center justify-between drag-region">
         <div className="flex items-center space-x-2.5 no-drag">
@@ -88,6 +98,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           <button
             onClick={onNewProjectModal}
+            title="Crear un proyecto nuevo a partir de una plantilla"
             className="p-5 rounded-xl border border-primary/30 bg-primary/5 hover:bg-primary/10 transition text-left flex items-start space-x-3.5 group shadow-sm"
           >
             <div className="p-2.5 rounded-lg bg-primary text-primary-foreground group-hover:scale-105 transition-transform">
@@ -105,6 +116,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
           <button
             onClick={onOpenFolderDialog}
+            title="Buscar y abrir una carpeta de proyecto"
             className="p-5 rounded-xl border border-border bg-card/60 hover:bg-accent/60 transition text-left flex items-start space-x-3.5 group shadow-sm"
           >
             <div className="p-2.5 rounded-lg bg-secondary text-foreground group-hover:scale-105 transition-transform">
@@ -147,6 +159,27 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           </div>
         </div>
 
+        <section className="rounded-xl border border-border bg-card/50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary"><Download className="w-5 h-5" /></div>
+            <div>
+              <h2 className="font-semibold text-sm text-foreground">Actualizaciones de LUMEN</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                {updateState.message || (updateState.checking ? 'Buscando una versión nueva…' : 'Versión instalada: ' + updateState.version)}
+              </p>
+              {updateState.available && !updateState.canInstall && <p className="text-xs text-amber-500 mt-1"><AlertCircle className="inline w-3 h-3 mr-1" />La versión está publicada, pero aún no tiene instalador automático.</p>}
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={onCheckUpdates} disabled={updateState.checking || updateState.installing} className="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-accent disabled:opacity-50 flex items-center gap-2">
+              <RefreshCw className={`w-3.5 h-3.5 ${updateState.checking ? 'animate-spin' : ''}`} />Buscar actualización
+            </button>
+            {updateState.available && updateState.canInstall && <button onClick={onInstallUpdate} disabled={updateState.installing} className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-2">
+              <Download className="w-3.5 h-3.5" />{updateState.installing ? 'Instalando…' : 'Actualizar ahora'}
+            </button>}
+          </div>
+        </section>
+
         {/* Quick Starter Templates */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -158,6 +191,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <button
               onClick={() => onQuickCreateFromTemplate('article')}
+              title="Crear un artículo científico"
               className="p-3.5 rounded-lg border border-border bg-card/40 hover:bg-card hover:border-primary/50 transition text-left group"
             >
               <div className="flex items-center space-x-2 mb-2">
@@ -171,6 +205,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
             <button
               onClick={() => onQuickCreateFromTemplate('thesis')}
+              title="Crear una tesis con estructura modular"
               className="p-3.5 rounded-lg border border-border bg-card/40 hover:bg-card hover:border-primary/50 transition text-left group"
             >
               <div className="flex items-center space-x-2 mb-2">
@@ -184,6 +219,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
             <button
               onClick={() => onQuickCreateFromTemplate('ieee')}
+              title="Crear un artículo con formato IEEE"
               className="p-3.5 rounded-lg border border-border bg-card/40 hover:bg-card hover:border-primary/50 transition text-left group"
             >
               <div className="flex items-center space-x-2 mb-2">
@@ -197,6 +233,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
             <button
               onClick={() => onQuickCreateFromTemplate('presentation')}
+              title="Crear una presentación Beamer"
               className="p-3.5 rounded-lg border border-border bg-card/40 hover:bg-card hover:border-primary/50 transition text-left group"
             >
               <div className="flex items-center space-x-2 mb-2">
@@ -246,6 +283,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar proyecto o ruta..."
+                title="Filtrar los proyectos recientes por nombre o ruta"
                 className="w-full bg-secondary/40 border border-border rounded-md pl-8 pr-3 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
@@ -264,6 +302,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 <div
                   key={proj.id || proj.path}
                   onClick={() => onOpenProject(proj.path)}
+                  title={`Abrir proyecto ${proj.name}`}
                   className="p-3.5 rounded-lg border border-border bg-card/40 hover:bg-card hover:border-primary/40 transition flex items-center justify-between group cursor-pointer"
                 >
                   <div className="flex items-center space-x-3 min-w-0">
@@ -292,6 +331,15 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           )}
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => void window.lumenAPI.openExternal('https://github.com/titooDiaz/LUMEN')}
+        title="Abrir el repositorio de LUMEN en GitHub"
+        aria-label="Abrir el repositorio de LUMEN en GitHub"
+        className="fixed bottom-5 right-5 z-20 flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-lg transition hover:scale-105 hover:bg-accent hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <Github className="h-6 w-6" />
+      </button>
     </div>
   );
 };

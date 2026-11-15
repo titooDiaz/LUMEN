@@ -11,6 +11,7 @@ interface ConnectedPeer {
   isHost: boolean;
   socket: WebSocket;
   connectedAt: string;
+  cursor?: { filePath: string; lineNumber: number; column: number };
 }
 
 class CollabHostServer {
@@ -20,6 +21,7 @@ class CollabHostServer {
   private roomId: string = 'lumen-doc';
   private peers: Map<string, ConnectedPeer> = new Map();
   private documents: Map<string, Y.Doc> = new Map();
+  private cursors: Map<string, { filePath: string; lineNumber: number; column: number }> = new Map();
 
   public getLocalIPAddresses(): string[] {
     const interfaces = os.networkInterfaces();
@@ -95,6 +97,15 @@ class CollabHostServer {
             Y.applyUpdate(doc, Buffer.from(message.update, 'base64'));
             this.documents.set(message.filePath, doc);
             this.broadcast(raw, peerId);
+          } else if (message.type === 'lumen:cursor' && message.cursor && typeof message.cursor.filePath === 'string') {
+            const cursor = {
+              filePath: message.cursor.filePath,
+              lineNumber: Math.max(1, Number(message.cursor.lineNumber) || 1),
+              column: Math.max(1, Number(message.cursor.column) || 1),
+            };
+            this.cursors.set(peerId, cursor);
+            peer.cursor = cursor;
+            this.broadcast(JSON.stringify({ ...message, peerId, name: peer.name, color: peer.color }), peerId);
           } else {
             this.broadcast(raw, peerId);
           }
@@ -113,12 +124,15 @@ class CollabHostServer {
 
       ws.on('close', () => {
         this.peers.delete(peerId);
+        this.cursors.delete(peerId);
+        this.broadcast(JSON.stringify({ type: 'lumen:cursor-remove', peerId }), peerId);
         this.broadcastPeerList();
       });
 
       ws.on('error', (err) => {
         console.error(`Socket error for peer ${peerId}:`, err);
         this.peers.delete(peerId);
+        this.cursors.delete(peerId);
         this.broadcastPeerList();
       });
     });
@@ -159,6 +173,7 @@ class CollabHostServer {
         isHost: p.isHost,
         canWrite: p.canWrite,
         connectedAt: p.connectedAt,
+        cursor: p.cursor,
       });
     }
 

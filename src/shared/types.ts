@@ -70,6 +70,7 @@ export interface CollabUser {
   isHost: boolean;
   canWrite: boolean;
   connectedAt: string;
+  cursor?: { filePath: string; lineNumber: number; column: number };
 }
 
 export interface CollabStatus {
@@ -83,6 +84,9 @@ export interface CollabStatus {
 
 export interface LumenAPI {
   isNative: boolean;
+  checkForUpdates: () => Promise<{ currentVersion: string; latestVersion: string; updateAvailable: boolean; releaseUrl: string; canInstall: boolean }>;
+  installUpdate: () => Promise<boolean>;
+  openExternal: (url: string) => Promise<void>;
   // Filesystem
   selectDirectory: () => Promise<string | null>;
   selectImage: () => Promise<{ path: string; name: string } | null>;

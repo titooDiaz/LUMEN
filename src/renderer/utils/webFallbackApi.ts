@@ -194,6 +194,9 @@ export function initLumenAPI(): void {
 
     window.lumenAPI = {
       isNative: false,
+      checkForUpdates: async () => ({ currentVersion: '1.0.0', latestVersion: '1.0.0', updateAvailable: false, releaseUrl: '', canInstall: false }),
+      installUpdate: async () => false,
+      openExternal: async (url: string) => { window.open(url, '_blank', 'noopener,noreferrer'); },
       selectDirectory: async () => '/home/usuario/Documentos/Proyecto-Demo',
       selectImage: async () => ({
         path: '/home/usuario/Imágenes/figura1.png',

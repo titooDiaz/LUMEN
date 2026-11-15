@@ -24,6 +24,7 @@ import { MathInsertModal } from './components/modals/MathInsertModal';
 import { CollabModal } from './components/modals/CollabModal';
 import { NewProjectModal } from './components/modals/NewProjectModal';
 import { SaveAsModal } from './components/modals/SaveAsModal';
+import { CreateEntryModal } from './components/modals/CreateEntryModal';
 import { X, FileCode } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -83,10 +84,12 @@ export const App: React.FC = () => {
   const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isSaveAsModalOpen, setIsSaveAsModalOpen] = useState(false);
+  const [createEntry, setCreateEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string } | null>(null);
   const [selectedModalTemplate, setSelectedModalTemplate] = useState<TemplateId>('article');
   const [customProjectsFolder, setCustomProjectsFolder] = useState<string>(() => {
     return localStorage.getItem('lumen_custom_projects_folder') || '';
   });
+  const [updateState, setUpdateState] = useState({ checking: false, installing: false, available: false, version: '…', canInstall: false, message: '' });
 
   // Collaboration state
   const [collabStatus, setCollabStatus] = useState<CollabStatus>({
@@ -96,11 +99,13 @@ export const App: React.FC = () => {
   const [userName, setUserName] = useState<string>('Autor Local');
   const [isConnectedRemote, setIsConnectedRemote] = useState<boolean>(false);
   const collabWsRef = useRef<WebSocket | null>(null);
+  const cursorSendTimerRef = useRef<NodeJS.Timeout | null>(null);
   const yDocsRef = useRef<Map<string, Y.Doc>>(new Map());
   const applyingRemoteUpdateRef = useRef(false);
 
   // Monaco editor reference
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
+  const mathSelectionRef = useRef<monacoType.Range | null>(null);
 
   // Auto-compile debounce timer
   const compileTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -417,7 +422,7 @@ export const App: React.FC = () => {
       return;
     }
     const editor = editorRef.current;
-    const selection = editor.getSelection();
+    const selection = mathSelectionRef.current || editor.getSelection() || editor.getModel()?.getFullModelRange();
     if (!selection) return;
     editor.executeEdits('lumen-visual-insert', [
       {
@@ -430,7 +435,18 @@ export const App: React.FC = () => {
     // resulting model immediately so visual insertions cannot be overwritten
     // by the previous React value.
     handleCodeChange(editor.getValue());
+    mathSelectionRef.current = null;
     editor.focus();
+  };
+
+  const handleOpenMathModal = () => {
+    const editor = editorRef.current;
+    if (!editor || !activeFilePath) {
+      setIsMathModalOpen(true);
+      return;
+    }
+    mathSelectionRef.current = editor.getSelection() || editor.getModel()?.getFullModelRange() || null;
+    setIsMathModalOpen(true);
   };
 
   const handleInsertImage = (snippet: string) => {
@@ -499,23 +515,31 @@ export const App: React.FC = () => {
 
   // Create file in project
   const handleCreateFile = async (parentDir: string) => {
-    const fileName = prompt('Nombre del nuevo archivo (ej. capitulo1.tex o referencias.bib):');
-    if (!fileName) return;
-
-    const newPath = `${parentDir}/${fileName.trim()}`;
-    await window.lumenAPI.createFile(newPath, `% Archivo: ${fileName}\n`);
-    await refreshProjectTree(currentProject!.path);
-    handleSelectFile(newPath);
+    setCreateEntry({ kind: 'file', parentDir });
   };
 
   // Create folder in project
   const handleCreateFolder = async (parentDir: string) => {
-    const folderName = prompt('Nombre de la nueva carpeta:');
-    if (!folderName) return;
+    setCreateEntry({ kind: 'folder', parentDir });
+  };
 
-    const newPath = `${parentDir}/${folderName.trim()}`;
-    await window.lumenAPI.createFolder(newPath);
-    await refreshProjectTree(currentProject!.path);
+  const handleCreateEntrySubmit = async (name: string) => {
+    if (!createEntry || !currentProject) return;
+    const normalizedName = name.trim();
+    if (!normalizedName || normalizedName.includes('/') || normalizedName.includes('\\')) throw new Error('Escribe un nombre válido, sin rutas.');
+    const newPath = `${createEntry.parentDir}/${normalizedName}`;
+    const exists = await window.lumenAPI.pathExists(newPath);
+    if (exists) throw new Error('Ya existe un archivo o carpeta con ese nombre.');
+    if (createEntry.kind === 'file') {
+      await window.lumenAPI.createFile(newPath, `% Archivo: ${normalizedName}\n`);
+      await refreshProjectTree(currentProject.path);
+      setCreateEntry(null);
+      await handleSelectFile(newPath);
+    } else {
+      await window.lumenAPI.createFolder(newPath);
+      await refreshProjectTree(currentProject.path);
+      setCreateEntry(null);
+    }
   };
 
   // Delete path
@@ -656,12 +680,21 @@ export const App: React.FC = () => {
             const existing = yDocsRef.current.get(msg.filePath);
             if (!existing) return;
             applyingRemoteUpdateRef.current = true;
-            Y.applyUpdate(existing, decodeUpdate(msg.update), 'remote');
-            const content = existing.getText('content').toString();
-            setFileContents((prev) => ({ ...prev, [msg.filePath]: content }));
-            setIsDirty((prev) => ({ ...prev, [msg.filePath]: true }));
-            void window.lumenAPI.writeFile(msg.filePath, content);
-            applyingRemoteUpdateRef.current = false;
+            try {
+              Y.applyUpdate(existing, decodeUpdate(msg.update), 'remote');
+              const content = existing.getText('content').toString();
+              setFileContents((prev) => ({ ...prev, [msg.filePath]: content }));
+              setIsDirty((prev) => ({ ...prev, [msg.filePath]: true }));
+              void window.lumenAPI.writeFile(msg.filePath, content);
+            } finally {
+              applyingRemoteUpdateRef.current = false;
+            }
+          }
+          if (msg.type === 'lumen:cursor' && msg.peerId) {
+            setCollabStatus((prev) => ({ ...prev, clients: prev.clients.map((client) => client.id === msg.peerId ? { ...client, cursor: msg.cursor } : client) }));
+          }
+          if (msg.type === 'lumen:cursor-remove' && msg.peerId) {
+            setCollabStatus((prev) => ({ ...prev, clients: prev.clients.map((client) => client.id === msg.peerId ? { ...client, cursor: undefined } : client) }));
           }
           if (msg.type === 'lumen:peer-list') {
             setCollabStatus((prev) => ({ ...prev, clients: msg.clients }));
@@ -680,8 +713,41 @@ export const App: React.FC = () => {
   };
 
   const handleConnectRemote = (host: string, port: number, token: string, nick: string) => {
+    if (collabWsRef.current && collabWsRef.current.readyState < WebSocket.CLOSING) collabWsRef.current.close();
     connectToCollab(host, port, token, nick);
   };
+
+  const handleCursorChange = (position: { lineNumber: number; column: number }) => {
+    const socket = collabWsRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !activeFilePath) return;
+    if (cursorSendTimerRef.current) clearTimeout(cursorSendTimerRef.current);
+    cursorSendTimerRef.current = setTimeout(() => {
+      socket.send(JSON.stringify({ type: 'lumen:cursor', cursor: { filePath: activeFilePath, ...position } }));
+    }, 45);
+  };
+
+  const handleCheckUpdates = async () => {
+    setUpdateState((state) => ({ ...state, checking: true, message: '' }));
+    try {
+      const result = await window.lumenAPI.checkForUpdates();
+      setUpdateState({ checking: false, installing: false, available: result.updateAvailable, version: result.currentVersion, canInstall: result.canInstall, message: result.updateAvailable ? `Disponible: versión ${result.latestVersion}` : 'Tienes la versión más reciente.' });
+    } catch (error) {
+      setUpdateState((state) => ({ ...state, checking: false, message: error instanceof Error ? error.message : 'No se pudo consultar GitHub.' }));
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateState((state) => ({ ...state, installing: true, message: 'Descargando e instalando. Puede aparecer una solicitud gráfica de contraseña.' }));
+    try {
+      await window.lumenAPI.installUpdate();
+    } catch (error) {
+      setUpdateState((state) => ({ ...state, installing: false, message: error instanceof Error ? error.message : 'No se pudo instalar la actualización.' }));
+    }
+  };
+
+  useEffect(() => {
+    if (!currentProject) void handleCheckUpdates();
+  }, [currentProject]);
 
   // Render Welcome Screen if no project is active
   if (!currentProject) {
@@ -696,6 +762,9 @@ export const App: React.FC = () => {
           compilers={compilers}
           theme={theme}
           onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          updateState={updateState}
+          onCheckUpdates={handleCheckUpdates}
+          onInstallUpdate={handleInstallUpdate}
         />
 
         <NewProjectModal
@@ -736,6 +805,9 @@ export const App: React.FC = () => {
         onOpenCollab={() => setIsCollabModalOpen(true)}
         collabPeerCount={collabStatus.clients.length}
         isHostingCollab={collabStatus.isHosting}
+        collabParticipants={collabStatus.clients}
+        currentUserName={userName}
+        isConnectedRemote={isConnectedRemote}
         onExportPdf={handleExportPdf}
         onSaveProjectAs={() => setIsSaveAsModalOpen(true)}
         theme={theme}
@@ -789,6 +861,8 @@ export const App: React.FC = () => {
                       {dirty && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
                       <button
                         onClick={(e) => handleCloseTab(tabPath, e)}
+                        title={`Cerrar ${fileName}`}
+                        aria-label={`Cerrar ${fileName}`}
                         className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition"
                       >
                         <X className="w-3 h-3" />
@@ -803,7 +877,7 @@ export const App: React.FC = () => {
                 onInsertCode={handleInsertCode}
                 onOpenImagePicker={() => setIsImageModalOpen(true)}
                 onOpenTableModal={() => setIsTableModalOpen(true)}
-                onOpenMathModal={() => setIsMathModalOpen(true)}
+                onOpenMathModal={handleOpenMathModal}
               />
 
               {/* Code Editor */}
@@ -817,6 +891,8 @@ export const App: React.FC = () => {
                     theme={theme}
                     diagnostics={compileResult?.errors || []}
                     editorRef={editorRef}
+                    onCursorChange={handleCursorChange}
+                    remoteCursors={collabStatus.clients.filter((user) => user.cursor?.filePath === activeFilePath).map((user) => ({ id: user.id, name: user.name, color: user.color, lineNumber: user.cursor!.lineNumber, column: user.cursor!.column }))}
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">
@@ -870,8 +946,15 @@ export const App: React.FC = () => {
 
       <MathInsertModal
         isOpen={isMathModalOpen}
-        onClose={() => setIsMathModalOpen(false)}
+        onClose={() => { setIsMathModalOpen(false); mathSelectionRef.current = null; }}
         onInsertMath={handleInsertCode}
+      />
+
+      <CreateEntryModal
+        kind={createEntry?.kind || 'file'}
+        isOpen={Boolean(createEntry)}
+        onClose={() => setCreateEntry(null)}
+        onSubmit={handleCreateEntrySubmit}
       />
 
       <CollabModal

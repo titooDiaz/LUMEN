@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,7 @@ import {
   copyProjectToDirectory,
 } from './ipc/projectHandlers';
 import { collabServerInstance } from './ipc/collabServer';
+import './ipc/updateHandlers';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -214,4 +215,12 @@ ipcMain.handle('system:save-file-as', async (_, params: { defaultPath: string; c
 
 ipcMain.handle('system:show-in-folder', async (_, targetPath: string) => {
   return showPathInFileManager(targetPath);
+});
+
+ipcMain.handle('system:open-external', async (_, targetUrl: string) => {
+  const parsed = new URL(targetUrl);
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' || parsed.pathname !== '/titooDiaz/LUMEN') {
+    throw new Error('Enlace externo no permitido.');
+  }
+  await shell.openExternal('https://github.com/titooDiaz/LUMEN');
 });

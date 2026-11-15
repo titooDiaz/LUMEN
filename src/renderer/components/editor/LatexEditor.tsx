@@ -11,6 +11,8 @@ interface LatexEditorProps {
   theme: 'dark' | 'light';
   diagnostics: DiagnosticItem[];
   editorRef: React.MutableRefObject<monacoType.editor.IStandaloneCodeEditor | null>;
+  onCursorChange?: (position: { lineNumber: number; column: number }) => void;
+  remoteCursors?: Array<{ id: string; name: string; color: string; lineNumber: number; column: number }>;
 }
 
 export const LatexEditor: React.FC<LatexEditorProps> = ({
@@ -21,8 +23,11 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   theme,
   diagnostics,
   editorRef,
+  onCursorChange,
+  remoteCursors = [],
 }) => {
   const monacoInstanceRef = useRef<Monaco | null>(null);
+  const cursorDecorationsRef = useRef<string[]>([]);
 
   // Monaco commands are registered only once (on mount). Keep the latest
   // callbacks in refs so Ctrl+Enter / Ctrl+S always act on the currently open
@@ -38,6 +43,7 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   ) => {
     editorRef.current = editor;
     monacoInstanceRef.current = monaco;
+    editor.onDidChangeCursorPosition(({ position }) => onCursorChange?.(position));
 
     // Define custom LUMEN dark and light themes
     monaco.editor.defineTheme('lumen-dark', {
@@ -235,6 +241,32 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
 
     monacoInstanceRef.current.editor.setModelMarkers(model, 'lumen-latex', markers);
   }, [diagnostics]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const styleId = 'lumen-remote-cursor-styles';
+    let style = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
+      style.id = styleId;
+      document.head.appendChild(style);
+    }
+    style.textContent = remoteCursors.map((cursor) => {
+      const className = `lumen-cursor-${cursor.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+      return `.${className}::before{border-left:2px solid ${cursor.color};margin-left:-1px}.${className}-line{background:${cursor.color}20}`;
+    }).join('\n');
+    cursorDecorationsRef.current = editor.deltaDecorations(cursorDecorationsRef.current, remoteCursors.map((cursor) => ({
+      range: new (monacoInstanceRef.current!.Range)(cursor.lineNumber, cursor.column, cursor.lineNumber, cursor.column),
+      options: {
+        className: `lumen-cursor-${cursor.id.replace(/[^a-zA-Z0-9_-]/g, '')}-line`,
+        beforeContentClassName: `lumen-cursor-${cursor.id.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+        hoverMessage: { value: `${cursor.name} está aquí` },
+        stickiness: monacoInstanceRef.current!.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        overviewRuler: { color: cursor.color, position: monacoInstanceRef.current!.editor.OverviewRulerLane.Right },
+      },
+    })));
+  }, [remoteCursors, editorRef]);
 
   return (
     <div className="w-full h-full relative overflow-hidden">

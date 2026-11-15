@@ -101,6 +101,9 @@ Convierte los registros crudos de la terminal LaTeX en diagnósticos legibles:
 
 ## 🛠️ Instalación y Puesta en Marcha
 
+### Actualizaciones desde la aplicación
+En la pantalla principal, LUMEN consulta las versiones publicadas en GitHub. Si hay una nueva versión, **Actualizar ahora** descarga e instala el paquete Debian desde la interfaz gráfica; Ubuntu/Mint solicitará confirmar la instalación con la ventana de autenticación del sistema. La versión instalada se toma de `package.json` y las versiones nuevas se publican con una etiqueta Git `v<versión>` (por ejemplo, `v1.1.0`). El flujo de GitHub Actions genera y adjunta el instalador `.deb` automáticamente. La actualización integrada requiere una instalación Debian/Ubuntu/Mint mediante el paquete `.deb`.
+
 ### 1. Clonar o acceder al repositorio
 ```bash
 git clone https://github.com/titooDiaz/LUMEN.git
@@ -168,6 +171,9 @@ src/
     └── utils/
         └── webFallbackApi.ts        # Fallback de alta fidelidad para previsualización web y tests
 ```
+
+git tag v1.0.0
+git push origin v1.0.0
 
 ---
 

@@ -1,0 +1,57 @@
+name: Publicar versión de LUMEN
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            targets: deb AppImage
+          - os: windows-latest
+            platform: win
+            targets: nsis
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Comprobar que la etiqueta coincide con package.json
+        shell: bash
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          test "$VERSION" = "$GITHUB_REF_NAME" || { echo "La etiqueta debe ser $VERSION"; exit 1; }
+      - run: npm ci
+      - run: npm run build:fast
+      - name: Crear instaladores
+        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.targets }} --publish never
+      - name: Subir instaladores como artefactos de Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: LUMEN-${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Publicar instaladores en GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-artifacts/* --generate-notes --title "LUMEN $GITHUB_REF_NAME"

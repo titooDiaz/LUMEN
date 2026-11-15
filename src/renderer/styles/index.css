@@ -85,6 +85,15 @@
   -webkit-app-region: no-drag;
 }
 
+.lumen-remote-cursor-marker {
+  border-left: 2px solid var(--remote-cursor-color, #f43f5e);
+  margin-left: -1px;
+}
+
+.lumen-remote-cursor {
+  background: color-mix(in srgb, var(--remote-cursor-color, #f43f5e) 12%, transparent);
+}
+
 /* Modern animations */
 @keyframes pulseGlow {
   0%, 100% {
