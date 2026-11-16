@@ -51,14 +51,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
-          merge-multiple: true
+          merge-multiple: false
       - name: Publicar instaladores en GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -d '' assets < <(find release-artifacts -type f -print0)
+          # Publicar solo instaladores. Los artefactos auxiliares de electron-builder
+          # (por ejemplo icudtl.dat) pueden tener el mismo nombre en ambas plataformas.
+          mapfile -d '' assets < <(find release-artifacts -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.exe' \) -print0 | sort -z)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "No se encontraron archivos para publicar en release-artifacts"
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes --title "LUMEN $GITHUB_REF_NAME"
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --generate-notes --title "LUMEN $GITHUB_REF_NAME"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber

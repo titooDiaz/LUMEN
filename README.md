@@ -172,8 +172,8 @@ src/
         └── webFallbackApi.ts        # Fallback de alta fidelidad para previsualización web y tests
 ```
 
-git tag v1.0.5
-git push origin v1.0.5
+git tag v1.0.6
+git push origin v1.0.6
 
 ---
 
