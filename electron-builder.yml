@@ -11,6 +11,8 @@ files:
   - dist-electron
   - bin
 win:
+  # Avoid the Windows executable signing/resource-edit step in unsigned CI builds.
+  signAndEditExecutable: false
   target:
     - nsis
   # The SVG is used only for the Windows installer. The app's existing
