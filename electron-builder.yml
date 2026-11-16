@@ -15,9 +15,6 @@ win:
   signAndEditExecutable: false
   target:
     - nsis
-  # The SVG is used only for the Windows installer. The app's existing
-  # renderer branding stays unchanged.
-  icon: latex-ghost-logo.svg
 nsis:
   oneClick: false
   perMachine: false
