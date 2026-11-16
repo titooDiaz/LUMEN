@@ -55,4 +55,10 @@ jobs:
       - name: Publicar instaladores en GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-artifacts/* --generate-notes --title "LUMEN $GITHUB_REF_NAME"
+        run: |
+          mapfile -d '' assets < <(find release-artifacts -type f -print0)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No se encontraron archivos para publicar en release-artifacts"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes --title "LUMEN $GITHUB_REF_NAME"
