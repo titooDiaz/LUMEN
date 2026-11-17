@@ -1,7 +1,8 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import * as os from 'node:os';
 import * as Y from 'yjs';
-import { CollabStatus } from '../../shared/types';
+import * as dgram from 'node:dgram';
+import { CollabSession, CollabStatus } from '../../shared/types';
 
 interface ConnectedPeer {
   id: string;
@@ -22,7 +23,12 @@ class CollabHostServer {
   private peers: Map<string, ConnectedPeer> = new Map();
   private documents: Map<string, Y.Doc> = new Map();
   private cursors: Map<string, { filePath: string; lineNumber: number; column: number }> = new Map();
-  private sessionInfo: { projectName: string; fileName: string; content: string } | null = null;
+  private sessionInfo: { projectName: string; fileName: string; content: string; sharedFilePath: string } | null = null;
+  private discoverySocket: dgram.Socket | null = null;
+  private advertiseTimer: NodeJS.Timeout | null = null;
+  private discovered = new Map<string, CollabSession>();
+  private readonly discoveryPort = 45876;
+  private sessionName = 'Sesión LUMEN';
 
   public getLocalIPAddresses(): string[] {
     const interfaces = os.networkInterfaces();
@@ -38,6 +44,39 @@ class CollabHostServer {
     return ips.length > 0 ? ips : ['127.0.0.1'];
   }
 
+  public startDiscovery(): void {
+    if (this.discoverySocket) return;
+    const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    this.discoverySocket = socket;
+    socket.on('message', (buffer, remote) => {
+      try {
+        const beacon = JSON.parse(buffer.toString()) as { type?: string; port?: number; name?: string; participants?: number; active?: boolean };
+        if (beacon.type !== 'lumen:session' || !Number.isInteger(beacon.port)) return;
+        const id = `${remote.address}:${beacon.port}`;
+        if (beacon.active === false) this.discovered.delete(id);
+        else this.discovered.set(id, { id, name: beacon.name || 'Sesión LUMEN', host: remote.address, port: beacon.port!, participants: beacon.participants || 1, updatedAt: Date.now() });
+      } catch { /* Ignore unrelated LAN packets. */ }
+    });
+    socket.bind(this.discoveryPort, '0.0.0.0', () => socket.setBroadcast(true));
+  }
+
+  public getAvailableSessions(): CollabSession[] {
+    const cutoff = Date.now() - 10000;
+    for (const [id, session] of this.discovered) if (session.updatedAt < cutoff) this.discovered.delete(id);
+    return [...this.discovered.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private announce(active = true): void {
+    if (!this.discoverySocket) return;
+    const message = Buffer.from(JSON.stringify({ type: 'lumen:session', port: this.port, name: this.sessionName, participants: this.peers.size, active }));
+    for (const ip of this.getLocalIPAddresses()) {
+      const parts = ip.split('.').map(Number);
+      if (parts.length !== 4) continue;
+      parts[3] = 255;
+      try { this.discoverySocket.send(message, this.discoveryPort, parts.join('.')); } catch { /* Socket may still be binding. */ }
+    }
+  }
+
   public start(port = 8765, token?: string): { success: boolean; port: number; token: string; ips: string[] } {
     if (this.wss) {
       this.stop();
@@ -47,6 +86,9 @@ class CollabHostServer {
     this.token = token || Math.random().toString(36).substring(2, 10).toUpperCase();
 
     this.wss = new WebSocketServer({ port: this.port });
+    this.startDiscovery();
+    this.announce();
+    this.advertiseTimer = setInterval(() => this.announce(), 3000);
 
     this.wss.on('connection', (ws: WebSocket, req) => {
       // Validate authentication token from query string e.g. /?token=XYZ&name=Bob
@@ -96,7 +138,9 @@ class CollabHostServer {
               });
             }
           } else if (message.type === 'lumen:session-info' && typeof message.projectName === 'string' && typeof message.fileName === 'string') {
-            this.sessionInfo = { projectName: message.projectName, fileName: message.fileName, content: typeof message.content === 'string' ? message.content : '' };
+            this.sessionName = message.projectName;
+            this.sessionInfo = { projectName: message.projectName, fileName: message.fileName, content: typeof message.content === 'string' ? message.content : '', sharedFilePath: message.sharedFilePath || message.fileName };
+            this.announce();
             this.broadcast(raw, peerId);
           } else if (
             (message.type === 'lumen:y-update' || message.type === 'lumen:y-sync-init') &&
@@ -137,6 +181,7 @@ class CollabHostServer {
         this.cursors.delete(peerId);
         this.broadcast(JSON.stringify({ type: 'lumen:cursor-remove', peerId }), peerId);
         this.broadcastPeerList();
+        this.announce();
       });
 
       ws.on('error', (err) => {
@@ -144,6 +189,7 @@ class CollabHostServer {
         this.peers.delete(peerId);
         this.cursors.delete(peerId);
         this.broadcastPeerList();
+        this.announce();
       });
     });
 
@@ -157,6 +203,9 @@ class CollabHostServer {
 
   public stop(): boolean {
     if (this.wss) {
+      this.announce(false);
+      if (this.advertiseTimer) clearInterval(this.advertiseTimer);
+      this.advertiseTimer = null;
       for (const peer of this.peers.values()) {
         try {
           peer.socket.close(1000, 'Host stopped session');

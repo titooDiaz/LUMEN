@@ -403,6 +403,7 @@ export function initLumenAPI(): void {
           : [],
       }),
       getLocalIPs: async () => ['192.168.1.105', '127.0.0.1'],
+      getAvailableCollabSessions: async () => [],
       exportPdf: async (pdfPath: string) => {
         if (!pdfPath) return false;
         const link = document.createElement('a');

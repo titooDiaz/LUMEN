@@ -82,6 +82,15 @@ export interface CollabStatus {
   clients: CollabUser[];
 }
 
+export interface CollabSession {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  participants: number;
+  updatedAt: number;
+}
+
 export interface LumenAPI {
   isNative: boolean;
   checkForUpdates: () => Promise<{ currentVersion: string; latestVersion: string; updateAvailable: boolean; releaseUrl: string; canInstall: boolean }>;
@@ -130,6 +139,7 @@ export interface LumenAPI {
   stopCollabServer: () => Promise<boolean>;
   getCollabStatus: () => Promise<CollabStatus>;
   getLocalIPs: () => Promise<string[]>;
+  getAvailableCollabSessions: () => Promise<CollabSession[]>;
 
   // System
   exportPdf: (pdfPath: string) => Promise<boolean>;

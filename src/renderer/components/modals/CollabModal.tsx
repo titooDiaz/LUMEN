@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Share2,
@@ -12,7 +12,7 @@ import {
   Radio,
   UserCheck,
 } from 'lucide-react';
-import { CollabStatus } from '../../../shared/types';
+import { CollabSession, CollabStatus } from '../../../shared/types';
 
 interface CollabModalProps {
   isOpen: boolean;
@@ -50,10 +50,24 @@ export const CollabModal: React.FC<CollabModalProps> = ({
   const [customToken, setCustomToken] = useState('');
 
   // Join configuration
-  const [joinHost, setJoinHost] = useState('127.0.0.1');
-  const [joinPort, setJoinPort] = useState(8765);
   const [joinToken, setJoinToken] = useState('');
   const [joinNick, setJoinNick] = useState(randomGhostName());
+  const [sessions, setSessions] = useState<CollabSession[]>([]);
+  const [selectedSession, setSelectedSession] = useState<CollabSession | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || mode !== 'join') return;
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const available = await window.lumenAPI.getAvailableCollabSessions();
+        if (alive) setSessions(available);
+      } catch { if (alive) setSessions([]); }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [isOpen, mode]);
 
   if (!isOpen) return null;
 
@@ -68,13 +82,14 @@ export const CollabModal: React.FC<CollabModalProps> = ({
   };
 
   const handleJoin = async () => {
+    if (!selectedSession) return;
     setJoining(true);
     setJoinError(false);
     setJoinMessage('Conectando con la sesión…');
     onChangeUserName(joinNick);
     let connected = false;
     try {
-      connected = await onConnectRemote(joinHost.trim(), joinPort, joinToken.trim(), joinNick.trim());
+      connected = await onConnectRemote(selectedSession.host, selectedSession.port, joinToken.trim(), joinNick.trim());
     } catch {
       connected = false;
     }
@@ -84,7 +99,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
       window.setTimeout(onClose, 1000);
     } else {
       setJoinError(true);
-      setJoinMessage('No se pudo unir. Revisa la IP, el puerto y el token; la sesión puede estar llena o cerrada.');
+      setJoinMessage('No se pudo unir. Revisa la contraseña; la sesión puede haberse cerrado o estar llena.');
     }
   };
 
@@ -267,35 +282,14 @@ export const CollabModal: React.FC<CollabModalProps> = ({
             /* Join Tab */
             <div className="space-y-3">
               <div>
-                <label className="text-muted-foreground block mb-1">Tu Nombre de Usuario / Autor:</label>
-                <input
-                  type="text"
-                  value={joinNick}
-                  onChange={(e) => setJoinNick(e.target.value)}
-                  className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  placeholder="Ej. Dr. Martínez"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <label className="text-muted-foreground block mb-1">Dirección IP del Anfitrión:</label>
-                  <input
-                    type="text"
-                    value={joinHost}
-                    onChange={(e) => setJoinHost(e.target.value)}
-                    className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="192.168.1.50"
-                  />
-                </div>
-                <div>
-                  <label className="text-muted-foreground block mb-1">Puerto:</label>
-                  <input
-                    type="number"
-                    value={joinPort}
-                    onChange={(e) => setJoinPort(parseInt(e.target.value, 10))}
-                    className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
+                <div className="mb-1 flex items-center justify-between"><label className="text-muted-foreground">Sesiones disponibles en tu red</label><span className="text-[10px] text-muted-foreground">Actualiza automáticamente</span></div>
+                <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border bg-secondary/20 p-1.5">
+                  {sessions.length === 0 ? <p className="p-3 text-center text-muted-foreground">Buscando sesiones… Comprueba que ambos equipos estén en la misma red Wi-Fi o LAN.</p> : sessions.map((session) => (
+                    <button key={session.id} type="button" onClick={() => setSelectedSession(session)} className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left ${selectedSession?.id === session.id ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-accent'}`}>
+                      <span><span className="block font-semibold text-foreground">👻 {session.name}</span><span className="font-mono text-[10px] text-muted-foreground">{session.host}:{session.port}</span></span>
+                      <span className="text-[10px] text-muted-foreground">{session.participants}/5</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -306,7 +300,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
                   value={joinToken}
                   onChange={(e) => setJoinToken(e.target.value)}
                   className="w-full bg-secondary/40 border border-border rounded-md px-2.5 py-1.5 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-                  placeholder="Introduce el token proporcionado por el creador"
+                  placeholder="Contraseña compartida por el anfitrión"
                 />
               </div>
 
@@ -314,7 +308,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
                 <button
                   type="button"
                   onClick={() => void handleJoin()}
-                  disabled={joining || !joinHost.trim() || !joinToken.trim() || !joinNick.trim()}
+                  disabled={joining || !selectedSession || !joinToken.trim() || !joinNick.trim()}
                   className="w-full py-2 bg-primary text-primary-foreground hover:bg-primary-hover rounded-md font-medium transition flex items-center justify-center space-x-2 shadow-sm"
                 >
                   <UserCheck className="w-4 h-4" />

@@ -41,6 +41,7 @@ const api: LumenAPI = {
   stopCollabServer: () => ipcRenderer.invoke('collab:stop-server'),
   getCollabStatus: () => ipcRenderer.invoke('collab:get-status'),
   getLocalIPs: () => ipcRenderer.invoke('collab:get-ips'),
+  getAvailableCollabSessions: () => ipcRenderer.invoke('collab:get-available-sessions'),
 
   // System
   exportPdf: (pdfPath: string) => ipcRenderer.invoke('system:export-pdf', pdfPath),

@@ -67,6 +67,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  collabServerInstance.startDiscovery();
   createWindow();
 
   app.on('activate', () => {
@@ -201,6 +202,8 @@ ipcMain.handle('collab:get-status', async () => {
 ipcMain.handle('collab:get-ips', async () => {
   return collabServerInstance.getLocalIPAddresses();
 });
+
+ipcMain.handle('collab:get-available-sessions', async () => collabServerInstance.getAvailableSessions());
 
 // System
 ipcMain.handle('system:export-pdf', async (_, pdfPath: string) => {
