@@ -107,6 +107,8 @@ export const App: React.FC = () => {
   });
   const [userName, setUserName] = useState<string>(() => GHOST_NAMES[Math.floor(Math.random() * GHOST_NAMES.length)]);
   const [isConnectedRemote, setIsConnectedRemote] = useState<boolean>(false);
+  const [collabConnectionError, setCollabConnectionError] = useState('');
+  const collabConnectionErrorRef = useRef('');
   const collabWsRef = useRef<WebSocket | null>(null);
   const sharedSessionRef = useRef<{ projectName: string; fileName: string; content: string; sharedFilePath: string } | null>(null);
   const localPathBySharedRef = useRef<Map<string, string>>(new Map());
@@ -668,6 +670,7 @@ export const App: React.FC = () => {
   const connectToCollab = (host: string, port: number, token: string, nick: string): Promise<boolean> => {
     return new Promise((resolve) => {
       let settled = false;
+      let rejectedReason = '';
       const finish = (result: boolean) => {
         if (settled) return;
         settled = true;
@@ -739,8 +742,14 @@ export const App: React.FC = () => {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setIsConnectedRemote(false);
+        if (event.code === 4001) rejectedReason = 'Token incorrecto: verifica la contraseña con quien hospeda la sesión.';
+        else if (event.code === 4002) rejectedReason = 'La sesión está llena (máximo 5 participantes).';
+        else if (event.code !== 1000) rejectedReason = 'No se pudo alcanzar el servidor. Comprueba IP, puerto y firewall; si el servidor está en otra red, el descubrimiento local no lo encontrará.';
+        const message = rejectedReason || 'La sesión se cerró antes de completar la conexión.';
+        collabConnectionErrorRef.current = message;
+        setCollabConnectionError(message);
         finish(false);
       };
       } catch (err) {
@@ -751,11 +760,19 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleConnectRemote = async (host: string, port: number, token: string, nick: string): Promise<boolean> => {
+  const handleConnectRemote = async (host: string, port: number, token: string, nick: string): Promise<boolean | string> => {
+    collabConnectionErrorRef.current = '';
+    setCollabConnectionError('');
     if (collabWsRef.current && collabWsRef.current.readyState < WebSocket.CLOSING) collabWsRef.current.close();
     sharedSessionRef.current = null;
     const connected = await connectToCollab(host, port, token, nick);
-    if (!connected) return false;
+    if (!connected) {
+      if (!collabConnectionErrorRef.current) {
+        collabConnectionErrorRef.current = 'No se pudo alcanzar el servidor. Comprueba IP, puerto y firewall; el descubrimiento local requiere que la red permita broadcasts.';
+        setCollabConnectionError(collabConnectionErrorRef.current);
+      }
+      return collabConnectionErrorRef.current;
+    }
     const session = sharedSessionRef.current as { projectName: string; fileName: string; content: string; sharedFilePath: string } | null;
     if (!session) {
       collabWsRef.current?.close();
@@ -840,6 +857,7 @@ export const App: React.FC = () => {
           currentUserName={userName}
           onChangeUserName={setUserName}
           isConnectedToRemote={isConnectedRemote}
+          connectionError={collabConnectionError}
           mode="join"
         />
 
@@ -1043,6 +1061,7 @@ export const App: React.FC = () => {
         currentUserName={userName}
         onChangeUserName={setUserName}
         isConnectedToRemote={isConnectedRemote}
+        connectionError={collabConnectionError}
         mode="host"
       />
 

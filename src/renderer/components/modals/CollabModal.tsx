@@ -20,10 +20,11 @@ interface CollabModalProps {
   status: CollabStatus;
   onStartServer: (port?: number, token?: string) => Promise<void>;
   onStopServer: () => Promise<void>;
-  onConnectRemote: (host: string, port: number, token: string, name: string) => Promise<boolean>;
+  onConnectRemote: (host: string, port: number, token: string, name: string) => Promise<boolean | string>;
   currentUserName: string;
   onChangeUserName: (name: string) => void;
   isConnectedToRemote: boolean;
+  connectionError?: string;
   mode: 'host' | 'join' | 'both';
 }
 
@@ -37,6 +38,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
   currentUserName,
   onChangeUserName,
   isConnectedToRemote,
+  connectionError = '',
   mode,
 }) => {
   const [activeTab, setActiveTab] = useState<'host' | 'join'>(mode === 'join' ? 'join' : 'host');
@@ -51,6 +53,8 @@ export const CollabModal: React.FC<CollabModalProps> = ({
 
   // Join configuration
   const [joinToken, setJoinToken] = useState('');
+  const [manualHost, setManualHost] = useState('');
+  const [manualPort, setManualPort] = useState('8765');
   const [joinNick, setJoinNick] = useState(randomGhostName());
   const [sessions, setSessions] = useState<CollabSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<CollabSession | null>(null);
@@ -82,14 +86,23 @@ export const CollabModal: React.FC<CollabModalProps> = ({
   };
 
   const handleJoin = async () => {
-    if (!selectedSession) return;
+    const host = selectedSession?.host || manualHost.trim();
+    const port = selectedSession?.port || Number(manualPort);
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+      setJoinError(true);
+      setJoinMessage('Selecciona una sesión o introduce una IP y un puerto válidos.');
+      return;
+    }
     setJoining(true);
     setJoinError(false);
     setJoinMessage('Conectando con la sesión…');
     onChangeUserName(joinNick);
     let connected = false;
+    let failureMessage = '';
     try {
-      connected = await onConnectRemote(selectedSession.host, selectedSession.port, joinToken.trim(), joinNick.trim());
+      const result = await onConnectRemote(host, port, joinToken.trim(), joinNick.trim());
+      connected = result === true;
+      if (typeof result === 'string') failureMessage = result;
     } catch {
       connected = false;
     }
@@ -99,7 +112,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
       window.setTimeout(onClose, 1000);
     } else {
       setJoinError(true);
-      setJoinMessage('No se pudo unir. Revisa la contraseña; la sesión puede haberse cerrado o estar llena.');
+      setJoinMessage(failureMessage || connectionError || 'No se pudo unir. Revisa el token y comprueba que la sesión siga activa.');
     }
   };
 
@@ -284,12 +297,23 @@ export const CollabModal: React.FC<CollabModalProps> = ({
               <div>
                 <div className="mb-1 flex items-center justify-between"><label className="text-muted-foreground">Sesiones disponibles en tu red</label><span className="text-[10px] text-muted-foreground">Actualiza automáticamente</span></div>
                 <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border bg-secondary/20 p-1.5">
-                  {sessions.length === 0 ? <p className="p-3 text-center text-muted-foreground">Buscando sesiones… Comprueba que ambos equipos estén en la misma red Wi-Fi o LAN.</p> : sessions.map((session) => (
+                  {sessions.length === 0 ? <p className="p-3 text-center text-muted-foreground">No se detectan sesiones. La red puede bloquear broadcasts; prueba ingresando la dirección LAN del anfitrión.</p> : sessions.map((session) => (
                     <button key={session.id} type="button" onClick={() => setSelectedSession(session)} className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left ${selectedSession?.id === session.id ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-accent'}`}>
                       <span><span className="block font-semibold text-foreground">👻 {session.name}</span><span className="font-mono text-[10px] text-muted-foreground">{session.host}:{session.port}</span></span>
                       <span className="text-[10px] text-muted-foreground">{session.participants}/5</span>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-[1fr_100px] gap-2">
+                <div>
+                  <label className="mb-1 block text-muted-foreground">Dirección IP del anfitrión (alternativa)</label>
+                  <input value={manualHost} onChange={(event) => setManualHost(event.target.value)} placeholder="10.14.120.203" className="w-full rounded-md border border-border bg-secondary/40 px-2.5 py-1.5 font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-muted-foreground">Puerto</label>
+                  <input value={manualPort} onChange={(event) => setManualPort(event.target.value)} inputMode="numeric" className="w-full rounded-md border border-border bg-secondary/40 px-2.5 py-1.5 font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
                 </div>
               </div>
 
@@ -308,7 +332,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
                 <button
                   type="button"
                   onClick={() => void handleJoin()}
-                  disabled={joining || !selectedSession || !joinToken.trim() || !joinNick.trim()}
+                  disabled={joining || (!selectedSession && !manualHost.trim()) || !joinToken.trim() || !joinNick.trim()}
                   className="w-full py-2 bg-primary text-primary-foreground hover:bg-primary-hover rounded-md font-medium transition flex items-center justify-center space-x-2 shadow-sm"
                 >
                   <UserCheck className="w-4 h-4" />

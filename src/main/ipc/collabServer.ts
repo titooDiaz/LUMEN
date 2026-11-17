@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as os from 'node:os';
 import * as Y from 'yjs';
 import * as dgram from 'node:dgram';
+import * as net from 'node:net';
 import { CollabSession, CollabStatus } from '../../shared/types';
 
 interface ConnectedPeer {
@@ -28,6 +29,7 @@ class CollabHostServer {
   private advertiseTimer: NodeJS.Timeout | null = null;
   private discovered = new Map<string, CollabSession>();
   private readonly discoveryPort = 45876;
+  private readonly sessionTtlMs = 10000;
   private sessionName = 'Sesión LUMEN';
 
   public getLocalIPAddresses(): string[] {
@@ -36,7 +38,7 @@ class CollabHostServer {
     for (const name of Object.keys(interfaces)) {
       for (const iface of interfaces[name] || []) {
         // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
-        if (iface.family === 'IPv4' && !iface.internal) {
+        if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254.')) {
           ips.push(iface.address);
         }
       }
@@ -51,17 +53,33 @@ class CollabHostServer {
     socket.on('message', (buffer, remote) => {
       try {
         const beacon = JSON.parse(buffer.toString()) as { type?: string; port?: number; name?: string; participants?: number; active?: boolean };
-        if (beacon.type !== 'lumen:session' || !Number.isInteger(beacon.port)) return;
+        if (beacon.type !== 'lumen:session' || !Number.isInteger(beacon.port) || beacon.port! < 1 || beacon.port! > 65535) return;
         const id = `${remote.address}:${beacon.port}`;
         if (beacon.active === false) this.discovered.delete(id);
         else this.discovered.set(id, { id, name: beacon.name || 'Sesión LUMEN', host: remote.address, port: beacon.port!, participants: beacon.participants || 1, updatedAt: Date.now() });
       } catch { /* Ignore unrelated LAN packets. */ }
     });
+    socket.on('error', (error) => console.error('Collaboration discovery socket error:', error));
     socket.bind(this.discoveryPort, '0.0.0.0', () => socket.setBroadcast(true));
   }
 
+  private getBroadcastAddresses(): string[] {
+    const broadcasts = new Set<string>();
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const iface of entries || []) {
+        if (iface.family !== 'IPv4' || iface.internal || iface.address.startsWith('169.254.')) continue;
+        const address = iface.address.split('.').map(Number);
+        const mask = iface.netmask.split('.').map(Number);
+        if (address.length !== 4 || mask.length !== 4 || [...address, ...mask].some((part) => !Number.isInteger(part) || part < 0 || part > 255)) continue;
+        const broadcast = address.map((part, index) => (part & mask[index]) | (~mask[index] & 255)).join('.');
+        if (net.isIPv4(broadcast) && broadcast !== '255.255.255.255') broadcasts.add(broadcast);
+      }
+    }
+    return [...broadcasts];
+  }
+
   public getAvailableSessions(): CollabSession[] {
-    const cutoff = Date.now() - 10000;
+    const cutoff = Date.now() - this.sessionTtlMs;
     for (const [id, session] of this.discovered) if (session.updatedAt < cutoff) this.discovered.delete(id);
     return [...this.discovered.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -69,11 +87,10 @@ class CollabHostServer {
   private announce(active = true): void {
     if (!this.discoverySocket) return;
     const message = Buffer.from(JSON.stringify({ type: 'lumen:session', port: this.port, name: this.sessionName, participants: this.peers.size, active }));
-    for (const ip of this.getLocalIPAddresses()) {
-      const parts = ip.split('.').map(Number);
-      if (parts.length !== 4) continue;
-      parts[3] = 255;
-      try { this.discoverySocket.send(message, this.discoveryPort, parts.join('.')); } catch { /* Socket may still be binding. */ }
+    for (const broadcastAddress of this.getBroadcastAddresses()) {
+      this.discoverySocket.send(message, this.discoveryPort, broadcastAddress, (error) => {
+        if (error) console.error(`Unable to advertise collaboration session to ${broadcastAddress}:`, error.message);
+      });
     }
   }
 
@@ -85,7 +102,7 @@ class CollabHostServer {
     this.port = port;
     this.token = token || Math.random().toString(36).substring(2, 10).toUpperCase();
 
-    this.wss = new WebSocketServer({ port: this.port });
+    this.wss = new WebSocketServer({ host: '0.0.0.0', port: this.port });
     this.startDiscovery();
     this.announce();
     this.advertiseTimer = setInterval(() => this.announce(), 3000);
@@ -218,9 +235,17 @@ class CollabHostServer {
       this.sessionInfo = null;
       this.wss.close();
       this.wss = null;
+      this.discovered.clear();
       return true;
     }
     return false;
+  }
+
+  public closeDiscovery(): void {
+    if (this.discoverySocket) {
+      this.discoverySocket.close();
+      this.discoverySocket = null;
+    }
   }
 
   public getStatus(): CollabStatus {

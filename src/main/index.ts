@@ -79,6 +79,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   collabServerInstance.stop();
+  collabServerInstance.closeDiscovery();
   if (process.platform !== 'darwin') {
     app.quit();
   }
