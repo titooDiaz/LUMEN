@@ -34,6 +34,7 @@ interface WelcomeScreenProps {
   onCheckUpdates: () => void;
   onInstallUpdate: () => void;
   onToggleFavorite: (project: ProjectMetadata) => void;
+  onJoinCollab: () => void;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
@@ -49,6 +50,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onCheckUpdates,
   onInstallUpdate,
   onToggleFavorite,
+  onJoinCollab,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'favorites'>('all');
@@ -131,6 +133,14 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
               <span className="text-xs text-muted-foreground mt-0.5 block">
                 Abrir cualquier directorio LaTeX de tu disco
               </span>
+            </div>
+          </button>
+
+          <button onClick={onJoinCollab} title="Conectarse a un colega con su IP, puerto y token" className="p-5 rounded-xl border border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10 transition text-left flex items-start space-x-3.5 group shadow-sm">
+            <div className="p-2.5 rounded-lg bg-violet-500/15 text-violet-400 text-xl group-hover:scale-105 transition-transform">👻</div>
+            <div>
+              <span className="font-semibold text-sm text-foreground block group-hover:text-violet-400 transition-colors">Unirse a un colega</span>
+              <span className="text-xs text-muted-foreground mt-0.5 block">Abrir un documento compartido en tiempo real</span>
             </div>
           </button>
 

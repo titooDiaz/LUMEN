@@ -20,10 +20,11 @@ interface CollabModalProps {
   status: CollabStatus;
   onStartServer: (port?: number, token?: string) => Promise<void>;
   onStopServer: () => Promise<void>;
-  onConnectRemote: (host: string, port: number, token: string, name: string) => void;
+  onConnectRemote: (host: string, port: number, token: string, name: string) => Promise<boolean>;
   currentUserName: string;
   onChangeUserName: (name: string) => void;
   isConnectedToRemote: boolean;
+  mode: 'host' | 'join' | 'both';
 }
 
 export const CollabModal: React.FC<CollabModalProps> = ({
@@ -36,8 +37,12 @@ export const CollabModal: React.FC<CollabModalProps> = ({
   currentUserName,
   onChangeUserName,
   isConnectedToRemote,
+  mode,
 }) => {
-  const [activeTab, setActiveTab] = useState<'host' | 'join'>('host');
+  const [activeTab, setActiveTab] = useState<'host' | 'join'>(mode === 'join' ? 'join' : 'host');
+  const [joining, setJoining] = useState(false);
+  const [joinMessage, setJoinMessage] = useState('');
+  const [joinError, setJoinError] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
 
   // Host configuration
@@ -48,7 +53,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
   const [joinHost, setJoinHost] = useState('127.0.0.1');
   const [joinPort, setJoinPort] = useState(8765);
   const [joinToken, setJoinToken] = useState('');
-  const [joinNick, setJoinNick] = useState(currentUserName || 'Investigador');
+  const [joinNick, setJoinNick] = useState(randomGhostName());
 
   if (!isOpen) return null;
 
@@ -62,11 +67,31 @@ export const CollabModal: React.FC<CollabModalProps> = ({
     await onStartServer(hostPort, customToken || undefined);
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
+    setJoining(true);
+    setJoinError(false);
+    setJoinMessage('Conectando con la sesión…');
     onChangeUserName(joinNick);
-    onConnectRemote(joinHost, joinPort, joinToken, joinNick);
-    onClose();
+    let connected = false;
+    try {
+      connected = await onConnectRemote(joinHost.trim(), joinPort, joinToken.trim(), joinNick.trim());
+    } catch {
+      connected = false;
+    }
+    setJoining(false);
+    if (connected) {
+      setJoinMessage('¡Conexión exitosa! Abriendo el archivo compartido…');
+      window.setTimeout(onClose, 1000);
+    } else {
+      setJoinError(true);
+      setJoinMessage('No se pudo unir. Revisa la IP, el puerto y el token; la sesión puede estar llena o cerrada.');
+    }
   };
+
+  function randomGhostName() {
+    const names = ['sigma ghost', 'random ghost', 'otaku ghost', 'pixel ghost', 'lunar ghost', 'cosmic ghost', 'syntax ghost', 'phantom ghost', 'boba ghost', 'neon ghost'];
+    return names[Math.floor(Math.random() * names.length)];
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -91,7 +116,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-border bg-secondary/30 px-5 pt-2 space-x-4 text-xs font-medium">
+        {mode === 'both' && <div className="flex border-b border-border bg-secondary/30 px-5 pt-2 space-x-4 text-xs font-medium">
           <button
             onClick={() => setActiveTab('host')}
             className={`pb-2 border-b-2 flex items-center space-x-1.5 transition ${
@@ -114,7 +139,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
             <Wifi className="w-3.5 h-3.5" />
             <span>Unirse a Sesión de un Colega</span>
           </button>
-        </div>
+        </div>}
 
         {/* Body */}
         <div className="p-5 space-y-4 text-xs">
@@ -136,7 +161,7 @@ export const CollabModal: React.FC<CollabModalProps> = ({
                     </span>
                     <p className="text-[11px] text-muted-foreground">
                       {status.isHosting
-                        ? `Alojando en puerto ${status.port} • ${status.clients.length} participante(s)`
+                        ? `Alojando en puerto ${status.port} • ${status.clients.length}/5 participante(s)`
                         : 'Inicia el servidor para compartir este proyecto desde tu máquina'}
                     </p>
                   </div>
@@ -288,12 +313,14 @@ export const CollabModal: React.FC<CollabModalProps> = ({
               <div className="pt-2">
                 <button
                   type="button"
-                  onClick={handleJoin}
+                  onClick={() => void handleJoin()}
+                  disabled={joining || !joinHost.trim() || !joinToken.trim() || !joinNick.trim()}
                   className="w-full py-2 bg-primary text-primary-foreground hover:bg-primary-hover rounded-md font-medium transition flex items-center justify-center space-x-2 shadow-sm"
                 >
                   <UserCheck className="w-4 h-4" />
-                  <span>Conectar y Sincronizar en Tiempo Real</span>
+                  <span>{joining ? 'Conectando…' : 'Unirme a la sesión'}</span>
                 </button>
+                {joinMessage && <p role={joinError ? 'alert' : 'status'} className={`mt-2 text-center text-xs ${joinError ? 'text-red-400' : 'text-emerald-400'}`}>{joinMessage}</p>}
               </div>
             </div>
           )}

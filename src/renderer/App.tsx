@@ -27,6 +27,8 @@ import { SaveAsModal } from './components/modals/SaveAsModal';
 import { CreateEntryModal } from './components/modals/CreateEntryModal';
 import { X, FileCode } from 'lucide-react';
 
+const GHOST_NAMES = ['sigma ghost', 'random ghost', 'otaku ghost', 'pixel ghost', 'lunar ghost', 'cosmic ghost', 'syntax ghost', 'phantom ghost', 'boba ghost', 'neon ghost'];
+
 export const App: React.FC = () => {
   const encodeUpdate = (update: Uint8Array): string => {
     let binary = '';
@@ -88,6 +90,7 @@ export const App: React.FC = () => {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [isMathModalOpen, setIsMathModalOpen] = useState(false);
   const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
+  const [isJoinCollabOpen, setIsJoinCollabOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isSaveAsModalOpen, setIsSaveAsModalOpen] = useState(false);
   const [createEntry, setCreateEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string } | null>(null);
@@ -102,9 +105,11 @@ export const App: React.FC = () => {
     isHosting: false,
     clients: [],
   });
-  const [userName, setUserName] = useState<string>('Autor Local');
+  const [userName, setUserName] = useState<string>(() => GHOST_NAMES[Math.floor(Math.random() * GHOST_NAMES.length)]);
   const [isConnectedRemote, setIsConnectedRemote] = useState<boolean>(false);
   const collabWsRef = useRef<WebSocket | null>(null);
+  const sharedSessionRef = useRef<{ projectName: string; fileName: string; content: string; sharedFilePath: string } | null>(null);
+  const localPathBySharedRef = useRef<Map<string, string>>(new Map());
   const cursorSendTimerRef = useRef<NodeJS.Timeout | null>(null);
   const yDocsRef = useRef<Map<string, Y.Doc>>(new Map());
   const applyingRemoteUpdateRef = useRef(false);
@@ -495,9 +500,10 @@ export const App: React.FC = () => {
     if (content) text.insert(0, content);
     doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === 'remote' || !collabWsRef.current || collabWsRef.current.readyState !== WebSocket.OPEN) return;
+      const sharedPath = [...localPathBySharedRef.current.entries()].find(([, localPath]) => localPath === filePath)?.[0] || filePath;
       collabWsRef.current.send(JSON.stringify({
         type: 'lumen:y-update',
-        filePath,
+        filePath: sharedPath,
         update: encodeUpdate(update),
       }));
     });
@@ -648,9 +654,9 @@ export const App: React.FC = () => {
   const handleStartCollabServer = async (port = 8765, token?: string) => {
     const res = await window.lumenAPI.startCollabServer({ port, token });
     if (res.success) {
+      await connectToCollab('127.0.0.1', res.port, res.token, userName);
       const updatedStatus = await window.lumenAPI.getCollabStatus();
       setCollabStatus(updatedStatus);
-      connectToCollab('127.0.0.1', res.port, res.token, userName);
     }
   };
 
@@ -659,14 +665,30 @@ export const App: React.FC = () => {
     setCollabStatus({ isHosting: false, clients: [] });
   };
 
-  const connectToCollab = (host: string, port: number, token: string, nick: string) => {
-    try {
-      const ws = new WebSocket(`ws://${host}:${port}/?token=${token}&name=${encodeURIComponent(nick)}`);
+  const connectToCollab = (host: string, port: number, token: string, nick: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (timeout !== undefined) window.clearTimeout(timeout);
+        resolve(result);
+      };
+      let ws: WebSocket;
+      let timeout: number | undefined;
+      try {
+      ws = new WebSocket(`ws://${host}:${port}/?token=${encodeURIComponent(token)}&name=${encodeURIComponent(nick)}`);
+      timeout = window.setTimeout(() => { ws.close(); finish(false); }, 6000);
       collabWsRef.current = ws;
 
       ws.onopen = () => {
         setIsConnectedRemote(true);
-        ws.send(JSON.stringify({ type: 'lumen:y-sync-request' }));
+        if (currentProject && activeFilePath) {
+          ws.send(JSON.stringify({
+            type: 'lumen:session-info', projectName: currentProject.name,
+            fileName: activeFilePath.split('/').pop(), content: fileContentsRef.current[activeFilePath] || '', sharedFilePath: activeFilePath,
+          }));
+        }
         for (const [filePath, doc] of yDocsRef.current) {
           ws.send(JSON.stringify({
             type: 'lumen:y-sync-init',
@@ -679,25 +701,32 @@ export const App: React.FC = () => {
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          if (msg.type === 'lumen:ready') finish(true);
+          if (msg.type === 'lumen:session-info' && typeof msg.fileName === 'string') {
+            sharedSessionRef.current = { projectName: msg.projectName || 'Documento compartido', fileName: msg.fileName, content: msg.content || '', sharedFilePath: msg.sharedFilePath || msg.fileName };
+          }
           if (msg.type === 'lumen:y-update' && msg.filePath && msg.update) {
-            if (!yDocsRef.current.has(msg.filePath)) {
-              ensureCollabDocument(msg.filePath, '');
+            const localPath = localPathBySharedRef.current.get(msg.filePath) || (currentProjectRef.current && msg.filePath.startsWith(`${currentProjectRef.current.path}/`) ? msg.filePath : null);
+            if (!localPath) return;
+            if (!yDocsRef.current.has(localPath)) {
+              ensureCollabDocument(localPath, '');
             }
-            const existing = yDocsRef.current.get(msg.filePath);
+            const existing = yDocsRef.current.get(localPath);
             if (!existing) return;
             applyingRemoteUpdateRef.current = true;
             try {
               Y.applyUpdate(existing, decodeUpdate(msg.update), 'remote');
               const content = existing.getText('content').toString();
-              setFileContents((prev) => ({ ...prev, [msg.filePath]: content }));
-              setIsDirty((prev) => ({ ...prev, [msg.filePath]: true }));
-              void window.lumenAPI.writeFile(msg.filePath, content);
+              setFileContents((prev) => ({ ...prev, [localPath]: content }));
+              setIsDirty((prev) => ({ ...prev, [localPath]: true }));
+              void window.lumenAPI.writeFile(localPath, content);
             } finally {
               applyingRemoteUpdateRef.current = false;
             }
           }
           if (msg.type === 'lumen:cursor' && msg.peerId) {
-            setCollabStatus((prev) => ({ ...prev, clients: prev.clients.map((client) => client.id === msg.peerId ? { ...client, cursor: msg.cursor } : client) }));
+            const mappedCursor = { ...msg.cursor, filePath: localPathBySharedRef.current.get(msg.cursor.filePath) || msg.cursor.filePath };
+            setCollabStatus((prev) => ({ ...prev, clients: prev.clients.map((client) => client.id === msg.peerId ? { ...client, name: msg.name || client.name, color: msg.color || client.color, cursor: mappedCursor } : client) }));
           }
           if (msg.type === 'lumen:cursor-remove' && msg.peerId) {
             setCollabStatus((prev) => ({ ...prev, clients: prev.clients.map((client) => client.id === msg.peerId ? { ...client, cursor: undefined } : client) }));
@@ -712,15 +741,40 @@ export const App: React.FC = () => {
 
       ws.onclose = () => {
         setIsConnectedRemote(false);
+        finish(false);
       };
-    } catch (err) {
+      } catch (err) {
+        if (timeout !== undefined) window.clearTimeout(timeout);
       console.error('Remote collab connection failed:', err);
-    }
+        finish(false);
+      }
+    });
   };
 
-  const handleConnectRemote = (host: string, port: number, token: string, nick: string) => {
+  const handleConnectRemote = async (host: string, port: number, token: string, nick: string): Promise<boolean> => {
     if (collabWsRef.current && collabWsRef.current.readyState < WebSocket.CLOSING) collabWsRef.current.close();
-    connectToCollab(host, port, token, nick);
+    sharedSessionRef.current = null;
+    const connected = await connectToCollab(host, port, token, nick);
+    if (!connected) return false;
+    const session = sharedSessionRef.current as { projectName: string; fileName: string; content: string; sharedFilePath: string } | null;
+    if (!session) {
+      collabWsRef.current?.close();
+      setIsConnectedRemote(false);
+      return false;
+    }
+    const base = await window.lumenAPI.getDefaultProjectPath();
+    const localProjectPath = `${base}/LUMEN-${session.projectName.replace(/[^\w-]/g, '-')}-compartido`;
+    await window.lumenAPI.createFolder(localProjectPath);
+    const localFile = `${localProjectPath}/${session.fileName}`;
+    await window.lumenAPI.createFile(localFile, session.content);
+    localPathBySharedRef.current.set(session.sharedFilePath, localFile);
+    setCollabStatus((prev) => ({ ...prev, clients: prev.clients.map((client) => client.cursor?.filePath === session.sharedFilePath ? { ...client, cursor: { ...client.cursor, filePath: localFile } } : client) }));
+    ensureCollabDocument(localFile, '');
+    await handleOpenProject(localProjectPath);
+    const joinSocket = collabWsRef.current;
+    if (joinSocket?.readyState === WebSocket.OPEN) joinSocket.send(JSON.stringify({ type: 'lumen:y-sync-request' }));
+    setIsJoinCollabOpen(false);
+    return true;
   };
 
   const handleCursorChange = (position: { lineNumber: number; column: number }) => {
@@ -728,7 +782,8 @@ export const App: React.FC = () => {
     if (!socket || socket.readyState !== WebSocket.OPEN || !activeFilePath) return;
     if (cursorSendTimerRef.current) clearTimeout(cursorSendTimerRef.current);
     cursorSendTimerRef.current = setTimeout(() => {
-      socket.send(JSON.stringify({ type: 'lumen:cursor', cursor: { filePath: activeFilePath, ...position } }));
+      const sharedPath = [...localPathBySharedRef.current.entries()].find(([, localPath]) => localPath === activeFilePath)?.[0] || activeFilePath;
+      socket.send(JSON.stringify({ type: 'lumen:cursor', cursor: { filePath: sharedPath, ...position } }));
     }, 45);
   };
 
@@ -772,6 +827,20 @@ export const App: React.FC = () => {
           onCheckUpdates={handleCheckUpdates}
           onInstallUpdate={handleInstallUpdate}
           onToggleFavorite={handleToggleFavorite}
+          onJoinCollab={() => setIsJoinCollabOpen(true)}
+        />
+
+        <CollabModal
+          isOpen={isJoinCollabOpen}
+          onClose={() => setIsJoinCollabOpen(false)}
+          status={{ isHosting: false, clients: [] }}
+          onStartServer={handleStartCollabServer}
+          onStopServer={handleStopCollabServer}
+          onConnectRemote={handleConnectRemote}
+          currentUserName={userName}
+          onChangeUserName={setUserName}
+          isConnectedToRemote={isConnectedRemote}
+          mode="join"
         />
 
         <NewProjectModal
@@ -812,7 +881,7 @@ export const App: React.FC = () => {
         onOpenCollab={() => setIsCollabModalOpen(true)}
         collabPeerCount={collabStatus.clients.length}
         isHostingCollab={collabStatus.isHosting}
-        collabParticipants={collabStatus.clients}
+        collabParticipants={collabStatus.clients.filter((participant) => !participant.isHost)}
         currentUserName={userName}
         isConnectedRemote={isConnectedRemote}
         onExportPdf={handleExportPdf}
@@ -974,6 +1043,7 @@ export const App: React.FC = () => {
         currentUserName={userName}
         onChangeUserName={setUserName}
         isConnectedToRemote={isConnectedRemote}
+        mode="host"
       />
 
       <NewProjectModal

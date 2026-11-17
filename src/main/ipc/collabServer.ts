@@ -22,6 +22,7 @@ class CollabHostServer {
   private peers: Map<string, ConnectedPeer> = new Map();
   private documents: Map<string, Y.Doc> = new Map();
   private cursors: Map<string, { filePath: string; lineNumber: number; column: number }> = new Map();
+  private sessionInfo: { projectName: string; fileName: string; content: string } | null = null;
 
   public getLocalIPAddresses(): string[] {
     const interfaces = os.networkInterfaces();
@@ -54,7 +55,11 @@ class CollabHostServer {
       const clientName = url.searchParams.get('name') || 'Invitado';
 
       if (this.token && clientToken !== this.token) {
-        ws.close(4001, 'Unauthorized: Invalid collaboration token');
+        ws.close(4001, 'INVALID_CREDENTIALS');
+        return;
+      }
+      if (this.peers.size >= 5) {
+        ws.close(4002, 'SESSION_FULL');
         return;
       }
 
@@ -71,8 +76,10 @@ class CollabHostServer {
         socket: ws,
         connectedAt: new Date().toISOString(),
       };
+      if (this.peers.size === 0) peer.isHost = true;
 
       this.peers.set(peerId, peer);
+      if (this.sessionInfo) this.send(ws, { type: 'lumen:session-info', ...this.sessionInfo });
       this.broadcastPeerList();
 
       // Handle raw messages (Yjs sync, awareness, cursor, chat)
@@ -88,6 +95,9 @@ class CollabHostServer {
                 update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
               });
             }
+          } else if (message.type === 'lumen:session-info' && typeof message.projectName === 'string' && typeof message.fileName === 'string') {
+            this.sessionInfo = { projectName: message.projectName, fileName: message.fileName, content: typeof message.content === 'string' ? message.content : '' };
+            this.broadcast(raw, peerId);
           } else if (
             (message.type === 'lumen:y-update' || message.type === 'lumen:y-sync-init') &&
             typeof message.filePath === 'string' &&
@@ -156,6 +166,7 @@ class CollabHostServer {
       }
       this.peers.clear();
       this.documents.clear();
+      this.sessionInfo = null;
       this.wss.close();
       this.wss = null;
       return true;
