@@ -33,6 +33,7 @@ interface WelcomeScreenProps {
   updateState: { checking: boolean; installing: boolean; available: boolean; version: string; canInstall: boolean; message: string };
   onCheckUpdates: () => void;
   onInstallUpdate: () => void;
+  onToggleFavorite: (project: ProjectMetadata) => void;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
@@ -47,6 +48,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   updateState,
   onCheckUpdates,
   onInstallUpdate,
+  onToggleFavorite,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'favorites'>('all');
@@ -320,6 +322,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   </div>
 
                   <div className="flex items-center space-x-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleFavorite(proj);
+                      }}
+                      title={proj.isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+                      aria-label={proj.isFavorite ? `Quitar ${proj.name} de favoritos` : `Agregar ${proj.name} a favoritos`}
+                      aria-pressed={Boolean(proj.isFavorite)}
+                      className="rounded p-1 text-amber-400 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
+                      <Star className={`w-4 h-4 ${proj.isFavorite ? 'fill-current' : ''}`} />
+                    </button>
                     <span className="text-[10px] text-muted-foreground">
                       {new Date(proj.lastOpened).toLocaleDateString()}
                     </span>

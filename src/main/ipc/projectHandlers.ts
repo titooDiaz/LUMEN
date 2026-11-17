@@ -47,9 +47,14 @@ export function saveRecentProject(project: ProjectMetadata): void {
   try {
     const file = getStoragePath();
     let list = loadRecentProjects();
+    const existingProject = list.find((item) => item.path === project.path);
     // Remove if already exists, then add to front
     list = list.filter((p) => p.path !== project.path);
-    list.unshift({ ...project, lastOpened: new Date().toISOString() });
+    list.unshift({
+      ...project,
+      isFavorite: project.isFavorite ?? existingProject?.isFavorite,
+      lastOpened: new Date().toISOString(),
+    });
     // Keep top 20
     list = list.slice(0, 20);
     fs.writeFileSync(file, JSON.stringify(list, null, 2), 'utf-8');

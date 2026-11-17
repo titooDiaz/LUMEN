@@ -60,6 +60,12 @@ export const App: React.FC = () => {
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState<Record<string, boolean>>({});
 
+  const handleToggleFavorite = async (project: ProjectMetadata) => {
+    const updatedProject = { ...project, isFavorite: !project.isFavorite };
+    await window.lumenAPI.saveProjectMetadata(updatedProject);
+    setRecentProjects(await window.lumenAPI.getRecentProjects());
+  };
+
   // Compilers state
   const [compilers, setCompilers] = useState<CompilerInfo[]>([]);
   const [selectedCompiler, setSelectedCompiler] = useState<CompilerType>('tectonic');
@@ -765,6 +771,7 @@ export const App: React.FC = () => {
           updateState={updateState}
           onCheckUpdates={handleCheckUpdates}
           onInstallUpdate={handleInstallUpdate}
+          onToggleFavorite={handleToggleFavorite}
         />
 
         <NewProjectModal
